@@ -46,6 +46,7 @@ static bool running = true;
 static bool audio_ok = false;
 /* Diagnostic: omit the sound CPU, mixer, output and worker dependency. */
 bool rr_vita_sound_disabled;
+int rr_vita_isolation;
 
 /* Settings stubs */
 void rr_host_set_winmode(int m) { (void)m; }
@@ -71,7 +72,7 @@ int  rr_host_joytest(void) { return 0; }
 bool rr_host_open(int scale) {
     (void)scale;
 
-    vita_log("[BUILD] sound-bypass-1\n");
+    vita_log("[BUILD] isolation-1\n");
 
     // Maximize Vita performance profile (444 MHz CPU, 222 MHz GPU)
     scePowerSetArmClockFrequency(444);
@@ -88,6 +89,14 @@ bool rr_host_open(int scale) {
     rr_vita_sound_disabled = sound_marker != NULL;
     if (sound_marker) fclose(sound_marker);
     vita_log("[SOUND_BYPASS] enabled=%d (CPU/mixer/output/worker)\n", rr_vita_sound_disabled);
+
+    FILE *isolation = fopen("ux0:/data/raverace_sim_only.enable", "rb");
+    if (isolation) { fclose(isolation); rr_vita_isolation = 1; }
+    else {
+        isolation = fopen("ux0:/data/raverace_render_replay.enable", "rb");
+        if (isolation) { fclose(isolation); rr_vita_isolation = 2; }
+    }
+    vita_log("[ISOLATION] mode=%d sound_enabled=%d\n", rr_vita_isolation, !rr_vita_sound_disabled);
 
     // Initialize SDL2 for audio subsystem
     if (SDL_Init(SDL_INIT_TIMER | (rr_vita_sound_disabled ? 0 : SDL_INIT_AUDIO)) != 0) {

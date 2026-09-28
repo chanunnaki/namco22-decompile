@@ -375,6 +375,11 @@ void rr_tick(void)
     previous_end = sceKernelGetProcessTimeWide();
     host_us += previous_end - video_end;
     if (frame % 60 == 0) {
+        static uint64_t wall_previous;
+        uint64_t wall_now = sceKernelGetProcessTimeWide();
+        if (wall_previous) VLOG("[ISOLATION_TICKS] frame=%u mode=%d ms_per_tick=%.3f\n",
+            frame, rr_vita_isolation, (wall_now-wall_previous)/60000.0);
+        wall_previous = wall_now;
         VLOG("[DEVICES] ms/frame parallel=%.2f join=%.2f wake=%.2f core=%d (sound/mix overlap DSP)\n",
              device_us / 60000.0, join_us / 60000.0, wake_us / 60000.0, rr_vita_sound_disabled ? -1 : sound_worker.cpu_id);
         device_us = join_us = wake_us = 0;

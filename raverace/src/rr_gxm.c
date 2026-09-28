@@ -13,6 +13,7 @@
 #include <psp2/kernel/threadmgr.h>
 #include <psp2/kernel/cpu.h>
 #include <stdatomic.h>
+#include <zlib.h>
 #include <psp2/gxm.h>
 #include <vita2d.h>
 #include <vitashark.h>
@@ -820,8 +821,53 @@ static void render_frame_job(void *arg) {
     }
 }
 
+/* The main thread joins this job immediately: simulation and sound execution
+ * remain paused while an immutable race snapshot is replayed on USER_1.
+ * Warm caches for 60 iterations, then time 180 completed presentations. */
+static void replay_snapshot_job(void *arg) {
+    (void)arg;
+    unsigned saved_frame = g_eng_frame;
+    unsigned source_frame = saved_frame + 1;
+    unsigned long before = crc32(0, (const Bytef *)&frame_mem, sizeof frame_mem);
+    for (int cached = 0; cached < 2; cached++) {
+        uint64_t begin = 0, prep = 0, draw = 0, present = 0;
+        for (unsigned i = 0; i < 240; i++) {
+            if (i == 60) {
+                vita2d_wait_rendering_done(); sceGxmDisplayQueueFinish();
+                begin = sceKernelGetProcessTimeWide();
+            }
+            uint64_t a = sceKernelGetProcessTimeWide();
+            if (!cached) prepare_snapshot(); else g_eng_frame++;
+            uint64_t b = sceKernelGetProcessTimeWide();
+            draw_snapshot(960, 544);
+            uint64_t c = sceKernelGetProcessTimeWide();
+            swap_snapshot();
+            uint64_t d = sceKernelGetProcessTimeWide();
+            if (i >= 60) { prep += b-a; draw += c-b; present += d-c; }
+        }
+        vita2d_wait_rendering_done(); sceGxmDisplayQueueFinish();
+        uint64_t end = sceKernelGetProcessTimeWide();
+        unsigned long after = crc32(0, (const Bytef *)&frame_mem, sizeof frame_mem);
+        VLOG("[REPLAY_RESULT] source=%u cached_geometry=%d frames=180 total_ms=%.3f prepare_ms=%.3f draw_ms=%.3f present_ms=%.3f quads=%d snapshot=%08lx unchanged=%d\n",
+             source_frame, cached, (end-begin)/180000.0, prep/180000.0,
+             draw/180000.0, present/180000.0, qn, before, before==after);
+        if (before != after) abort();
+    }
+    g_eng_frame = saved_frame;
+}
+
 void rr_gxm_prepare(bool slave_active) {
     if (!assets_ok) return;
+    if (rr_vita_isolation == 1) {
+        if (!pipeline_attempted) {
+            pipeline_attempted = true;
+            int affinity = sceKernelChangeThreadCpuAffinityMask(sceKernelGetThreadId(), SCE_KERNEL_CPU_MASK_USER_0);
+            VLOG("[ISOLATION] simulation main=USER_0 affinity_result=%d\n", affinity);
+        }
+        /* Keep the guest-visible display-list lifecycle without rendering. */
+        rr_scene_frame(slave_active); rr_scene_consume(); g_eng_frame++;
+        return;
+    }
     if (!pipeline_attempted) {
         pipeline_attempted = true;
         /* A marker provides a serial A/B path without another install. */
@@ -837,6 +883,14 @@ void rr_gxm_prepare(bool slave_active) {
     uint64_t joined = sceKernelGetProcessTimeWide();
     capture_frame(slave_active);
     uint64_t captured = sceKernelGetProcessTimeWide();
+    if (rr_vita_isolation == 2 &&
+        (g_eng_frame + 1 == 600 || g_eng_frame + 1 == 1200 || g_eng_frame + 1 == 1740)) {
+        VLOG("[REPLAY_BEGIN] source=%u\n", g_eng_frame+1);
+        if (pipeline_active) {
+            rr_worker_dispatch(&render_worker, replay_snapshot_job, NULL);
+            rr_worker_join(&render_worker);
+        } else replay_snapshot_job(NULL);
+    }
     if (pipeline_active) rr_worker_dispatch(&render_worker, render_frame_job, NULL);
     else prepare_snapshot();
     static uint64_t wait, copy;
@@ -849,8 +903,9 @@ void rr_gxm_prepare(bool slave_active) {
 }
 
 /* In the pipelined mode only the renderer thread touches GXM after init. */
-void rr_gxm_draw(int vw, int vh) { if (!pipeline_active) draw_snapshot(vw,vh); }
+void rr_gxm_draw(int vw, int vh) { if (rr_vita_isolation != 1 && !pipeline_active) draw_snapshot(vw,vh); }
 void rr_gxm_swap(void) {
+    if (rr_vita_isolation == 1) return;
     if (!pipeline_active) {
         swap_snapshot();
         atomic_store_explicit(&presented_quads, qn, memory_order_relaxed);

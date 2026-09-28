@@ -1,3 +1,11 @@
+## Simulation/render isolation — 2026-09-29
+
+- User requested independent feasibility tests before further rewrites. Same-binary `isolation-1` normal, simulation-only and frozen-renderer runs complete 1800 game ticks each. All 30 complete guest state/budget/race mode/speed checkpoints match; frozen triangle streams match normal source scenes, and snapshot CRCs remain unchanged. All exit cleanly.
+- Actual wall timing across 11 moving windows: normal **33.978 ms/tick (29.4/s)**; simulation with sound and no rendering **20.212 ms/tick (49.5/s)**, range 17.220–20.695 ms. Simulation alone still misses ~59.9 ticks/s. No snapshot copies, geometry workers or draw/swap work occur in simulation mode; guest display-list bookkeeping is preserved and main affinity remains USER_0.
+- Isolated renderer, game/sound execution paused: source frames 600/1200/1740 take **29.367/24.345/27.740 ms** rebuilding geometry and rendering. Reusing built geometry takes **28.749/23.461/27.343 ms**. Each result follows 60 warm-up frames and measures 180 completed frames, including final GPU/display drain. Removing preparation moves time into presentation backpressure; current drawing/presentation is independently below 60 FPS. These are embedded frozen-scene experiments, not a standalone rewritten renderer or isolated shader timestamps.
+- Extra snapshot buffering alone cannot fix both sustained limits. Need distinguish GPU work from presentation restrictions and address simulation sound/device execution. Results do not prove a Vita hardware limit or guarantee a clean rewrite.
+- Build/readback SHA256 `0f964b09514937200b9190410a0a6de719e6a4c4e3b243091241637a7d3a2779`; installed on Vita TV .158. Normal controls/rendering/audio restored; isolation, benchmark, sound bypass and GPU probe markers removed. Details and CSV: `docs/RAVERACER_ISOLATION.md`, `docs/RAVERACER_ISOLATION_BENCHMARK.csv`. Prior backup `/tmp/raverace-before-isolation.eboot.bin`.
+
 ## Full sound bypass diagnostic — 2026-09-29
 
 - User requested all sound processing removed from the loop. `sound-bypass-1` skips sound MCU and mixer initialization/execution, SDL audio output and all sound-worker creation/dispatch/join when `ux0:/data/raverace_sound_disable.enable` exists. Driving I/O remains active. Remove marker and relaunch to restore sound.

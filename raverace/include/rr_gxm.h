@@ -5,6 +5,9 @@
 #include <stdint.h>
 #include <psp2/gxm.h>
 
+/* Opt-in hardware isolation diagnostics: 0 normal, 1 simulation, 2 replay. */
+extern int rr_vita_isolation;
+
 bool rr_gxm_init(const char *rom_dir);
 void rr_gxm_prepare(bool slave_active);
 void rr_gxm_draw(int vw, int vh);
