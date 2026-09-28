@@ -107,5 +107,20 @@ void rr_sound_slice(void)
     int cyc = (int)(owed / den);
     owed -= (uint64_t)cyc * den;
     snd_execute(&cpu, cpu.cycles + (uint64_t)cyc);
+#ifdef __vita__
+    /* Sample slice boundaries to locate sound-program hot loops cheaply. */
+    static uint16_t pc_hits[65536];
+    static unsigned samples;
+    pc_hits[cpu.pc]++;
+    if (++samples == 960) {
+        unsigned best = 0;
+        for (unsigned i = 1; i < 65536; i++) if (pc_hits[i] > pc_hits[best]) best = i;
+        extern void vita_log(const char *, ...);
+        vita_log("[SND_PROFILE] pc=%04X hits=%u/960 page=%02X stopped=%d irqs=%llu\n",
+                 best, pc_hits[best], cpu.pg, cpu.stopped, (unsigned long long)cpu.irq_taken);
+        memset(pc_hits, 0, sizeof pc_hits);
+        samples = 0;
+    }
+#endif
     if (cpu.unimpl_hit) fprintf(stderr, "[SND] cannot execute opcode 0x%03X at %06X -- sound halted\n", cpu.unimpl_op, cpu.unimpl_pc);
 }

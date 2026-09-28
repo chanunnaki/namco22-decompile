@@ -176,35 +176,33 @@ void c352_generate(c352_t *c, int16_t *out, int n)
 
         for (int j = 0; j < 32; j++) {
             c352_voice_t *v = &c->voice[j];
-            int16_t s = 0;
+            if (!(v->flags & C352_FLG_BUSY)) continue;
 
-            if (v->flags & C352_FLG_BUSY) {
-                uint32_t next_counter = v->counter + v->freq;
+            uint32_t next_counter = v->counter + v->freq;
 
-                if (next_counter & 0x10000)
-                    fetch_sample(c, v);
+            if (next_counter & 0x10000)
+                fetch_sample(c, v);
 
-                if ((next_counter ^ v->counter) & 0x18000) {
-                    ramp_volume(v, 0, (uint8_t)(v->vol_f >> 8));
-                    ramp_volume(v, 1, (uint8_t)(v->vol_f & 0xff));
-                    ramp_volume(v, 2, (uint8_t)(v->vol_r >> 8));
-                    ramp_volume(v, 3, (uint8_t)(v->vol_r & 0xff));
-                }
+            if ((next_counter ^ v->counter) & 0x18000) {
+                ramp_volume(v, 0, (uint8_t)(v->vol_f >> 8));
+                ramp_volume(v, 1, (uint8_t)(v->vol_f & 0xff));
+                ramp_volume(v, 2, (uint8_t)(v->vol_r >> 8));
+                ramp_volume(v, 3, (uint8_t)(v->vol_r & 0xff));
+            }
 
-                v->counter = next_counter & 0xffff;
+            v->counter = next_counter & 0xffff;
 
-                s = v->sample;
+            int16_t s = v->sample;
 
-                if ((v->flags & C352_FLG_FILTER) == 0) {
-                    int32_t diff = (int32_t)v->sample - (int32_t)v->last_sample;
-                    uint32_t interp = (v->counter * (uint32_t)diff) >> 16;
-                    s = (int16_t)((int32_t)v->last_sample + (int32_t)interp);
-                }
+            if ((v->flags & C352_FLG_FILTER) == 0) {
+                int32_t diff = (int32_t)v->sample - (int32_t)v->last_sample;
+                uint32_t interp = (v->counter * (uint32_t)diff) >> 16;
+                s = (int16_t)((int32_t)v->last_sample + (int32_t)interp);
             }
 
             outv[0] += (((v->flags & C352_FLG_PHASEFL) ? -s : s) * v->curr_vol[0]) >> 8;
-            outv[2] += (((v->flags & C352_FLG_PHASERL) ? -s : s) * v->curr_vol[2]) >> 8;
             outv[1] += (((v->flags & C352_FLG_PHASEFR) ? -s : s) * v->curr_vol[1]) >> 8;
+            outv[2] += (((v->flags & C352_FLG_PHASERL) ? -s : s) * v->curr_vol[2]) >> 8;
             outv[3] += (((v->flags & C352_FLG_PHASEFR) ? -s : s) * v->curr_vol[3]) >> 8;
         }
 

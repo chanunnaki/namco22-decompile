@@ -9,43 +9,14 @@
 #include <string.h>
 #include "c25.h"
 
-static bool push(c71_t *d, uint16_t v)
-{
-    if (d->sp >= 64) { snprintf(d->error, sizeof d->error, "stack overflow"); return false; }
-    d->stack[d->sp++] = v; return true;
-}
+#include "c25_boundary.h"
 
 bool c71_step(c71_t *d)
 {
-    /* interrupts at the instruction boundary, in TMS32025 priority order:
-     * INT0 2, INT1 4, INT2 6, TINT 0x18, RINT 0x1A, XINT 0x1C */
-    if (!d->intm) {
-        static const struct { uint16_t bit, imr, vec; } iv[] = {
-            {1, 1, 2}, {2, 2, 4}, {4, 4, 6}, {8, 8, 0x18}, {0x10, 0x10, 0x1A}, {0x20, 0x20, 0x1C} };
-        if (d->tint_pend) d->ifr |= 8;
-        for (int k = 0; k < 6; k++)
-            if ((d->ifr & iv[k].bit) && (d->imr & iv[k].imr)) {
-                if (!push(d, d->pc)) return false;
-                d->pc = iv[k].vec; d->intm = 1; d->ifr &= ~iv[k].bit; d->idle = 0;
-                if (iv[k].bit == 8) d->tint_pend = 0;
-                break;
-            }
-    }
-    if (d->idle) {                        /* halted: nothing retires, the timer runs */
-        d->tim = d->tim == 0 ? d->prd : (uint16_t)(d->tim - 1);
-        if (d->tim == d->prd && (d->imr & 8)) d->tint_pend = 1;
-        return true;
-    }
-    int pc = d->pc;
-    if (c25_hook_pre) c25_hook_pre(d, pc);
-    d->cur_pc = pc;
-    d->steps++;
-    /* TIM ticks once per retired instruction, reloading from PRD at 0 */
-    d->tim = d->tim == 0 ? d->prd : (uint16_t)(d->tim - 1);
-    if (d->tim == d->prd && (d->imr & 8)) d->tint_pend = 1;
-    /* the instruction itself, with its RPT repeats: the translated program */
+    int state = c25_step_begin(d);
+    if (state <= 0) return state == 0;
     if (!d->xlat) { snprintf(d->error, sizeof d->error, "no program translation"); return false; }
-    if (!d->xlat(d, pc)) return false;
+    if (!d->xlat(d, d->cur_pc)) return false;
     if (c25_hook_post) c25_hook_post(d);
     return true;
 }

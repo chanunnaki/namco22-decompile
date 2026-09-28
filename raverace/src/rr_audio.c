@@ -28,7 +28,11 @@
  * hold the ring near TARGET -- no underrun crackle, no creeping latency. */
 #define OUT_HZ 48000
 #define RING 16384                            /* stereo frames, power of two */
+#ifdef __vita__
+#define TARGET (OUT_HZ * 80 / 1000)           /* 80 ms */
+#else
 #define TARGET (OUT_HZ * 60 / 1000)           /* 60 ms */
+#endif
 static int16_t ring[RING * 2];
 static atomic_uint r_head, r_tail;            /* written by producer / consumer */
 static SDL_AudioDeviceID dev;
@@ -75,6 +79,12 @@ static void audio_cb(void *u, Uint8 *stream, int len)
     atomic_store_explicit(&r_tail, t, memory_order_release);
     cb_samples += (uint32_t)n;
     if (cb_samples >= OUT_HZ) {
+#ifdef __vita__
+        extern void vita_log(const char *fmt, ...);
+        if (per_sec_ur > 0 || latency_resets > 0) {
+            vita_log("[AUDIO] underrun: %u, ring: %d, resets: %u\n", per_sec_ur, (int)(h - t), latency_resets);
+        }
+#endif
         static int logon = -1; if (logon < 0) logon = getenv("RR_AUDIOLOG") != NULL;
         if (logon) fprintf(stderr, "[AUDIO] second: %u underrun samples, ring %d, latency resets %u\n", per_sec_ur, (int)(h - t), latency_resets);
         cb_samples -= OUT_HZ; per_sec_ur = 0;
@@ -86,7 +96,11 @@ bool rr_audio_output_open(void)
     if (SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) { fprintf(stderr, "[AUDIO] SDL audio: %s\n", SDL_GetError()); return false; }
     SDL_AudioSpec want = { 0 }, have;
     want.freq = OUT_HZ; want.format = AUDIO_S16SYS; want.channels = 2; want.callback = audio_cb;
-    want.samples = 512;                          /* RR_AUDIO_SAMPLES: 480 = exactly 10 ms, for SDL's disk driver (it sleeps whole ms) */
+#ifdef __vita__
+    want.samples = 1024;
+#else
+    want.samples = 512;
+#endif
     if (getenv("RR_AUDIO_SAMPLES")) want.samples = (Uint16)atoi(getenv("RR_AUDIO_SAMPLES"));
     dev = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
     if (!dev) { fprintf(stderr, "[AUDIO] no audio device: %s\n", SDL_GetError()); return false; }

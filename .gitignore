@@ -19,6 +19,9 @@ palette_dump.bin
 dspram_dump.bin
 __pycache__/
 /raverace/build/
+/raverace/build-vita/
+/raverace/gen/rr_c25.c
+/raverace/gen/rr_c25_run.c
 /raverace/extracted/
 /raverace/gen/snd_driver.c
 /raverace/rr_controls.cfg

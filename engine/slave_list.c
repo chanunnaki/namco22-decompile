@@ -46,7 +46,7 @@ static void reflectq(int32_t m[3][3], int reflection)
     if (reflection & 0x20) for (int r = 0; r < 3; r++) m[r][1] = -m[r][1];
 }
 
-int eng_walk_list(eng_word_fn pw, const eng_list_cfg *cfg, geo_quad_cb cb, void *user)
+static int walk_list(eng_word_fn pw, const eng_list_cfg *cfg, geo_quad_cb cb, eng_object_cb object_cb, void *user)
 {
     /* ---- camera state, persistent across records ---- */
     int32_t viewq[3][3] = {{0x7FFF,0,0},{0,0x7FFF,0},{0,0,0x7FFF}};
@@ -143,10 +143,13 @@ int eng_walk_list(eng_word_fn pw, const eng_list_cfg *cfg, geo_quad_cb cb, void 
                 gv.light[2] = light_fx[2];
                 gv.ambient = amb_fx; gv.power = pow_fx;
                 gv.objectflags = objectflags;
-                geo_hw_set_view(&gv);
-                g_bbox_cur = (int)code;
-                geo_hw_object((int32_t)code, cb, user);
-                g_bbox_cur = -1;
+                if (object_cb) object_cb((int32_t)code, &gv, user);
+                else {
+                    geo_hw_set_view(&gv);
+                    g_bbox_cur = (int)code;
+                    geo_hw_object((int32_t)code, cb, user);
+                    g_bbox_cur = -1;
+                }
                 objectflags &= ~2;             /* blit_polyobject: per object */
                 prims++;
             }
@@ -163,4 +166,11 @@ int eng_walk_list(eng_word_fn pw, const eng_list_cfg *cfg, geo_quad_cb cb, void 
     if (cfg->out_zoom_mant) { *cfg->out_zoom_mant = zoom_mant; *cfg->out_zoom_shift = zoom_shift;
                               *cfg->out_vx = vx; *cfg->out_vy = vy; }
     return prims;
+}
+
+int eng_walk_list(eng_word_fn pw, const eng_list_cfg *cfg, geo_quad_cb cb, void *user) {
+    return walk_list(pw, cfg, cb, NULL, user);
+}
+int eng_walk_objects(eng_word_fn pw, const eng_list_cfg *cfg, eng_object_cb cb, void *user) {
+    return walk_list(pw, cfg, NULL, cb, user);
 }

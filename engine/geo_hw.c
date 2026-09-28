@@ -75,6 +75,7 @@ static inline int64_t fshr64(int64_t v, int n) { return v >> n; }
  *
  * Shifts must FLOOR (Python >>) and the divide must TRUNCATE (the oracle
  * defines sdiv with C semantics); __int128 gives both natively. */
+#if defined(__SIZEOF_INT128__)
 static inline int64_t mulshr128(int64_t a, int64_t b, int n)
 {
     return (int64_t)(((__int128)a * (__int128)b) >> n);
@@ -96,6 +97,171 @@ static inline int32_t proj_sat(int64_t base16, int64_t v, int32_t mant,
     if (r <  (__int128)INT32_MIN) return INT32_MIN;
     return (int32_t)r;
 }
+#else
+/* 32-bit fallback for targets without native __int128 (e.g. ARMv7 / PS Vita) */
+typedef struct {
+    uint64_t lo;
+    int64_t hi;
+} geo_int128_t;
+
+static inline geo_int128_t geo_mul64x64(int64_t a, int64_t b) {
+    int neg = (a < 0) ^ (b < 0);
+    uint64_t ua = (a < 0) ? -(uint64_t)a : (uint64_t)a;
+    uint64_t ub = (b < 0) ? -(uint64_t)b : (uint64_t)b;
+
+    uint64_t a_lo = (uint32_t)ua;
+    uint64_t a_hi = ua >> 32;
+    uint64_t b_lo = (uint32_t)ub;
+    uint64_t b_hi = ub >> 32;
+
+    uint64_t p0 = a_lo * b_lo;
+    uint64_t p1 = a_lo * b_hi;
+    uint64_t p2 = a_hi * b_lo;
+    uint64_t p3 = a_hi * b_hi;
+
+    uint64_t cy0 = (p0 >> 32) + (p1 & 0xFFFFFFFFULL) + (p2 & 0xFFFFFFFFULL);
+    uint64_t lo = (p0 & 0xFFFFFFFFULL) | (cy0 << 32);
+    uint64_t hi = p3 + (p1 >> 32) + (p2 >> 32) + (cy0 >> 32);
+
+    geo_int128_t r;
+    if (neg) {
+        r.lo = ~lo + 1;
+        r.hi = (int64_t)(~hi + (r.lo == 0 ? 1 : 0));
+    } else {
+        r.lo = lo;
+        r.hi = (int64_t)hi;
+    }
+    return r;
+}
+
+static inline geo_int128_t geo_ashr128(geo_int128_t a, int n) {
+    geo_int128_t r;
+    if (n <= 0) return a;
+    if (n < 64) {
+        r.lo = (a.lo >> n) | ((uint64_t)a.hi << (64 - n));
+        r.hi = a.hi >> n;
+    } else if (n < 128) {
+        r.lo = (uint64_t)(a.hi >> (n - 64));
+        r.hi = a.hi >> 63;
+    } else {
+        r.lo = (uint64_t)(a.hi >> 63);
+        r.hi = a.hi >> 63;
+    }
+    return r;
+}
+
+static inline geo_int128_t geo_shl128(geo_int128_t a, int n) {
+    geo_int128_t r;
+    if (n <= 0) return a;
+    if (n < 64) {
+        r.hi = (int64_t)(((uint64_t)a.hi << n) | (a.lo >> (64 - n)));
+        r.lo = a.lo << n;
+    } else if (n < 128) {
+        r.hi = (int64_t)(a.lo << (n - 64));
+        r.lo = 0;
+    } else {
+        r.hi = 0;
+        r.lo = 0;
+    }
+    return r;
+}
+
+static inline uint64_t geo_udiv128_64(uint64_t u1, uint64_t u0, uint64_t v) {
+    if (u1 >= v) return UINT64_MAX;
+    /* Almost all projected vertices fit in 64 bits. Avoid the 64-round
+     * long division loop for that common case on ARMv7. */
+    if (u1 == 0) return u0 / v;
+    uint64_t q = 0;
+    for (int i = 63; i >= 0; i--) {
+        uint64_t carry = (u0 >> 63) & 1;
+        u0 <<= 1;
+        uint64_t msb = (u1 >> 63) & 1;
+        u1 = (u1 << 1) | carry;
+        if (msb || u1 >= v) {
+            u1 -= v;
+            q |= (1ULL << i);
+        }
+    }
+    return q;
+}
+
+static inline int64_t mulshr128(int64_t a, int64_t b, int n) {
+    geo_int128_t prod = geo_mul64x64(a, b);
+    prod = geo_ashr128(prod, n);
+    return (int64_t)prod.lo;
+}
+
+static inline int32_t proj_sat(int64_t base16, int64_t v, int32_t mant,
+                               int shift, int64_t z, int negate)
+{
+    if (z == 0) {
+        if (base16 > INT32_MAX) return INT32_MAX;
+        if (base16 < INT32_MIN) return INT32_MIN;
+        return (int32_t)base16;
+    }
+
+    /* Normal camera coordinates and the DSP's signed 16-bit mantissa need
+     * at most 51 numerator bits. Keep the wide fallback for clipped extremes. */
+    if (v >= INT32_MIN && v <= INT32_MAX && mant >= INT16_MIN && mant <= INT16_MAX &&
+        shift >= 0 && shift < 64 && base16 >= INT32_MIN && base16 <= INT32_MAX) {
+        int64_t num64 = (v * mant * 16) >> shift;
+        int64_t q64;
+        /* ARMv7 has hardware floating divide but software 64-bit integer
+         * divide. This numerator has <=51 significant bits, so double holds
+         * it exactly. Correct the rounded quotient using integer arithmetic;
+         * the result still truncates exactly as the oracle does. */
+        if (z > 0 && z <= INT32_MAX) {
+            double estimate = (double)num64 / (double)(int32_t)z;
+            if (estimate > (double)INT32_MIN && estimate < (double)INT32_MAX) {
+                q64 = (int32_t)estimate;
+                int64_t remainder = num64 - q64 * z;
+                if (num64 >= 0) {
+                    if (remainder < 0) q64--;
+                    else if (remainder >= z) q64++;
+                } else {
+                    if (remainder > 0) q64++;
+                    else if (remainder <= -z) q64--;
+                }
+            } else q64 = num64 / z;
+        } else q64 = num64 / z;
+        int64_t r64 = base16 + (negate ? -q64 : q64);
+        if (r64 > INT32_MAX) return INT32_MAX;
+        if (r64 < INT32_MIN) return INT32_MIN;
+        return (int32_t)r64;
+    }
+
+    geo_int128_t num = geo_mul64x64(v, mant);
+    num = geo_shl128(num, 4);
+    num = geo_ashr128(num, shift);
+
+    int neg = 0;
+    uint64_t unum_lo = num.lo;
+    uint64_t unum_hi = (uint64_t)num.hi;
+    if (num.hi < 0) {
+        neg = !neg;
+        unum_lo = ~unum_lo + 1;
+        unum_hi = ~unum_hi + (unum_lo == 0 ? 1 : 0);
+    }
+    uint64_t uz = (uint64_t)z;
+    if (z < 0) {
+        neg = !neg;
+        uz = -(uint64_t)z;
+    }
+
+    int64_t q = 0;
+    if (unum_hi >= uz) {
+        q = INT64_MAX;
+    } else {
+        q = (int64_t)geo_udiv128_64(unum_hi, unum_lo, uz);
+    }
+    if (neg) q = -q;
+
+    int64_t r = base16 + (negate ? -q : q);
+    if (r > INT32_MAX) return INT32_MAX;
+    if (r < INT32_MIN) return INT32_MIN;
+    return (int32_t)r;
+}
+#endif
 
 static inline int32_t sat32(int64_t v)
 {
@@ -337,7 +503,18 @@ static void quad_fixed(int32_t color, uint32_t addr, int32_t polyshift,
      *
      * Python's // and >> floor; C truncates toward zero. fdiv/fshr below
      * keep the arithmetic identical for negative operands. */
-    {
+    if (!q.behind) {
+        /* No edge crosses the near plane: raw and rendered positions are
+         * identical. Reuse the projection rather than divide each vertex twice. */
+        q.nrv = n_pre = 4;
+        for (int i = 0; i < 4; i++) {
+            q.rv[i] = q.v[i];
+            q.rv[i].uf = (int32_t)(q.v[i].u << 16);
+            q.rv[i].vf = (int32_t)(q.v[i].v << 16);
+            q.rv[i].bf = (int32_t)((uint32_t)briv[i] << 16);
+            pre_x[i] = vx[i]; pre_y[i] = vy[i];
+        }
+    } else {
         const int UF = 16, TF = 24;
         int64_t px_[4], py_[4], pz_[4], pu_[4], pv_[4], pb_[4];
         for (int i = 0; i < 4; i++) {

@@ -75,7 +75,14 @@ const char *rr_romzip_missing(const char *dir)
     char p[1024];
     for (int i = 0; i < NROMS; i++) {
         snprintf(p, sizeof p, "%s/%s", dir, k_roms[i].name);
-        if (file_size(p) != (long)k_roms[i].size) return k_roms[i].name;
+        long sz = file_size(p);
+        if (sz != (long)k_roms[i].size) {
+#ifdef __vita__
+            extern void vita_log(const char *fmt, ...);
+            vita_log("[ROMZIP] %s: file_size('%s') = %ld (expected %u)\n", dir, p, sz, k_roms[i].size);
+#endif
+            return k_roms[i].name;
+        }
     }
     return NULL;
 }
@@ -177,11 +184,16 @@ done:
 
 static int find_zip(const char *name, const char *exe_dir, char *out, size_t n)
 {
-    const char *where[4] = { "", "roms/", exe_dir, exe_dir };
-    for (int i = 0; i < 4; i++) {
-        if (i >= 2 && !(exe_dir && *exe_dir)) break;
-        snprintf(out, n, i == 3 ? "%s/roms/%s" : i == 2 ? "%s/%s" : "%s%s",
-                 i >= 2 ? exe_dir : where[i], name);
+    const char *where[] = {
+        "", "roms/", "extracted/",
+        "ux0:data/raverace/", "ux0:data/raverace/roms/",
+        "app0:roms/", "app0:",
+        exe_dir, exe_dir
+    };
+    int nwhere = (int)(sizeof(where) / sizeof(where[0]));
+    for (int i = 0; i < nwhere; i++) {
+        if (!where[i] || !*where[i]) continue;
+        snprintf(out, n, "%s%s", where[i], name);
         if (file_size(out) > 0) return 1;
     }
     return 0;

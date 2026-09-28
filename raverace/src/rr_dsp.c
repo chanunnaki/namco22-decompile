@@ -125,11 +125,52 @@ void rr_dsp_control(uint8_t v)
 void rr_dsp_run(long steps)
 {
     if (!m || !running || faulted) return;
-    while (steps-- > 0)
+#ifdef __vita__
+    /* Experimental linked runner is opt-in until the reported grid movement
+     * is resolved. Default to the previously accepted step execution. */
+    static int linked = -1;
+    if (linked < 0) {
+        FILE *f = fopen("ux0:/data/raverace_linked_dsp.enable", "rb");
+        linked = f != NULL;
+        if (f) fclose(f);
+    }
+    if (linked) {
+        extern bool rr_c25_exec_run(c71_t *, long);
+        if (!rr_c25_exec_run(m, steps)) {
+            fprintf(stderr, "[DSP] master stopped at %04X: %s\n", m->cur_pc, m->error);
+            faulted = true;
+        }
+        return;
+    }
+#endif
+    while (steps > 0) {
+        if (m->idle) {
+            /* If idling and no unmasked pending interrupt, fast-forward timer */
+            if (m->intm || !(m->ifr & m->imr)) {
+                uint32_t to_underflow = (m->tim == 0 ? m->prd : m->tim);
+                if (to_underflow == 0) to_underflow = 1;
+                long skip = steps;
+                if (m->imr & 8) {
+                    if (skip > (long)to_underflow) skip = (long)to_underflow;
+                }
+                if (skip > 0) {
+                    if (m->tim >= skip) {
+                        m->tim -= skip;
+                    } else {
+                        m->tim = m->prd - (skip - m->tim - 1);
+                        if (m->imr & 8) m->tint_pend = 1;
+                    }
+                    steps -= skip;
+                    continue;
+                }
+            }
+        }
+        steps--;
         if (!c71_step(m)) {
             fprintf(stderr, "[DSP] master stopped at %04X: %s\n", m->cur_pc, m->error);
             faulted = true; return;
         }
+    }
 }
 
 void rr_dsp_vblank(void) { if (m && running && irq_on) c71_irq(m, 1); }
@@ -143,6 +184,12 @@ int32_t rr_dsp_pointram_read(uint32_t a)
     if (m && a >= C71_PTRAM_S22 && a < C71_PTRAM_S22 + C71_PTRAM_WORDS)
         return (int32_t)(m->ptram[a - C71_PTRAM_S22] << 8) >> 8;
     return -1;
+}
+
+void rr_dsp_copy_pointram(uint32_t *dst)
+{
+    if (m) memcpy(dst, m->ptram, sizeof m->ptram);
+    else memset(dst, 0xff, C71_PTRAM_WORDS * sizeof *dst);
 }
 
 void rr_dsp_debug(char *buf, int n)

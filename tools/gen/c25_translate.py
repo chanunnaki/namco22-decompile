@@ -28,7 +28,7 @@ instruction becomes a `case` that
 so the translation can be gated as EQUAL to the oracle. A PC with no
 translation TRAPS LOUDLY (the master stops and says where) -- never skipped.
 """
-import argparse, os, sys
+import argparse, os, sys, re
 
 ap = argparse.ArgumentParser()
 ap.add_argument('--game', required=True, choices=['pc', 'rr'])
@@ -36,6 +36,7 @@ ap.add_argument('--roms', required=True)
 ap.add_argument('--cov', action='append', default=[])
 ap.add_argument('--out')
 ap.add_argument('--func')
+ap.add_argument('--runner-out', help='Also emit an instruction-linked, budgeted runner')
 ap.add_argument('--attribute', nargs='+', help='DEV: C71_COV triple files -> the committed "ADDR TAG" coverage on stdout')
 ap.add_argument('--main-rom', help='rr: the assembled 68K program (raverace_main.bin)')
 ap.add_argument('--block', action='append', default=[], help='count-word address of a program block (hex); default: the game program')
@@ -210,3 +211,31 @@ os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
 open(a.out, 'w').write('\n'.join(out) + '\n')
 print(f'c25_translate: {a.game}: {len(ins)} addresses, {sum(len(v) for v in variants.values())} variants ({n_cov} covered, {static} static) -> {a.out}',
       file=sys.stderr)
+
+# Optional linked runner: retain every program-word guard and instruction
+# boundary, but transfer directly to the next translated label inside one
+# function. The single-step translation remains the reference path.
+if a.runner_out:
+    runner = '\n'.join(out) + '\n'
+    runner = runner.replace('#include "c25_sem.h"', '#include "c25_sem.h"\n#include "c25_boundary.h"')
+    next_macros = []
+    for target in sorted({(pc + length(op)) & 0xffff for pc in ins for op, _ in variants[pc]}):
+        transfer = f'if (pc == 0x{target:04X}) goto L_0x{target:04X}; ' if target in ins else ''
+        next_macros.append(f'#define NEXT_0x{target:04X} do {{ if (c25_hook_post) c25_hook_post(d); '
+            'int state_ = c25_run_begin(d, &steps); if (state_ <= 0) return state_ == 0; '
+            f'pc = d->cur_pc; {transfer}goto dispatch; }} while (0)')
+    runner = runner.replace('#define RUN(PC, OP, O)', '\n'.join(next_macros)+'\n#define RUN(PC, OP, O, NEXT)')
+    runner = runner.replace('d->ops = NULL; return true;', 'd->ops = NULL; NEXT;')
+    def link(m):
+        pc, op = int(m[1],16), int(m[2],16)
+        target = (pc + length(op)) & 0xffff
+        return f'RUN(0x{pc:04X}, 0x{op:04X}, {m[3]}, NEXT_0x{target:04X})'
+    runner = re.sub(r'RUN\(0x([0-9A-F]+), 0x([0-9A-F]+), (o|NULL)\)',link,runner)
+    runner = runner.replace(f'bool {a.func}(c71_t *d, int pc)\n{{',
+        f'bool {a.func}_run(c71_t *d, long steps)\n{{\n'
+        '    int state = c25_run_begin(d, &steps);\n'
+        '    if (state <= 0) return state == 0;\n'
+        '    int pc = d->cur_pc;\ndispatch:')
+    runner = re.sub(r'case (0x[0-9A-F]+):',r'case \1: L_\1:',runner)
+    open(a.runner_out,'w').write(runner)
+    print('linked DSP runner -> '+a.runner_out,file=sys.stderr)

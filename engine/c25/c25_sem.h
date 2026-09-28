@@ -205,7 +205,14 @@ static inline bool misc(c71_t *d, int op, int pc)
 }
 
 /* ONE instruction word `op` at `pc`, iteration `it` of its RPT repeats. */
-static inline bool c25_exec(c71_t *d, int pc, int op, int it)
+/* Generated translations pass constant opcodes. At low optimization levels
+ * GCC otherwise keeps the full runtime decoder call at every instruction. */
+#ifdef C25_SPECIALIZE
+#define C25_EXEC_INLINE __attribute__((always_inline))
+#else
+#define C25_EXEC_INLINE
+#endif
+static inline C25_EXEC_INLINE bool c25_exec(c71_t *d, int pc, int op, int it)
 {
     int hi = (op >> 8) & 0xFF, lo = op & 0xFF;
     uint32_t a, v;

@@ -143,7 +143,11 @@ int g_tex_opaque = 0;
  * other texel, which is what made them look low-resolution next to MAME.
  * PROPCYCL_TEX_FIXEDCAP=1 restores the flat 256. */
 int g_tex_bake_cap_req = TEX_BAKE_MAX;
+#ifdef __vita__
+int g_tex_fixedcap = 1; /* bound per-frame baking and transient VRAM on Vita */
+#else
 int g_tex_fixedcap = 0;
+#endif
 
 /* Set from PROPCYCL_TEX_POW2SAMPLE in main.c. */
 int g_tex_pow2sample = 0;
@@ -223,7 +227,11 @@ static void cmode_params(int cmode, int *out_offset, int *out_shift, int *out_ma
  * 32 to match. Neither number bounds VRAM -- TEX_CACHE_BYTE_BUDGET does
  * that, and the two must be sized together: a budget that admits more
  * entries than the table can hold is the failure above. */
+#ifdef __vita__
+#define TEX_CACHE_SIZE 4096
+#else
 #define TEX_CACHE_SIZE 65536
+#endif
 #define TEX_CACHE_PROBES 32
 #define TEX_CACHE_MASK (TEX_CACHE_SIZE - 1)
 
@@ -280,6 +288,11 @@ static int tex_free_n;
 
 static void tex_free_push(GLuint id, uint16_t w, uint16_t h)
 {
+#ifdef __vita__
+    /* The bounded GPU pool owns reclamation; do not retain freed allocations. */
+    glDeleteTextures(1, &id);
+    return;
+#endif
     if (tex_free_n < TEX_CACHE_SIZE) {
         tex_free[tex_free_n].id = id;
         tex_free[tex_free_n].w = w; tex_free[tex_free_n].h = h;
@@ -335,7 +348,11 @@ static GLuint tex_free_pop(int tw, int th, int *had_w, int *had_h)
  * PROPCYCL_TEXBUDGET=<MB> overrides it -- lower it on a small-VRAM card, and
  * note the eviction counter in the [PERF] line is how you tell if it is
  * thrashing again. */
+#ifdef __vita__
+#define TEX_CACHE_BUDGET_DEFAULT_MB 8
+#else
 #define TEX_CACHE_BUDGET_DEFAULT_MB 448
+#endif
 size_t tex_cache_budget = (size_t)TEX_CACHE_BUDGET_DEFAULT_MB * 1024 * 1024;
 #define TEX_CACHE_BYTE_BUDGET tex_cache_budget
 size_t tex_cache_bytes = 0;
@@ -729,6 +746,12 @@ GLuint bake_quad_texture(int min_u, int min_v, int range_u, int range_v,
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, bw, bh,
                     GL_RGBA, GL_UNSIGNED_BYTE, tex_pixel_buf);
 
+#ifdef __vita__
+    if (!gxm_tex_valid(tex)) {
+        glDeleteTextures(1, &tex);
+        return 0; /* retry next frame instead of caching a failed allocation */
+    }
+#endif
     /* Store in cache, EVICTING if the probe window is full.
      *
      * This used to just give up after 16 failed probes and return the

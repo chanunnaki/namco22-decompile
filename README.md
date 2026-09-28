@@ -1,4 +1,19 @@
-# Namco System 22 games for PC
+# Rave Racer for PS Vita — development fork
+
+This fork develops a native PS Vita / Vita TV implementation of Rave Racer,
+based on [spacestate1/namco22-decompile](https://github.com/spacestate1/namco22-decompile).
+Vita development lives on `codex/vita-native`; the original PC documentation
+is retained below. This is experimental work, not a finished 60 FPS port.
+
+The Vita implementation includes a GXM renderer and a concurrent frame pipeline.
+Further work may replace emulated subsystems with native implementations and
+change the shared engine substantially. Upstream remains the reference for the
+original implementation; this fork develops independently.
+
+Only source, tests and application artwork belong in this fork. Supply your own
+game files; local ROMs, generated DSP translations and build outputs are excluded.
+
+## Original project: Namco System 22 games for PC
 
 Namco arcade games from the 1990s, rebuilt so they run on a normal
 computer. You need your own copy of each game's files (the MAME versions);

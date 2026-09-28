@@ -23,8 +23,15 @@
 #include "rr_hw.h"
 #include "rr_dsp.h"
 #include "rr_video.h"
-#include "rr_gl.h"
+#ifdef __vita__
+#include "rr_gxm.h"
+#include <psp2/kernel/processmgr.h>
+#include <psp2/kernel/cpu.h>
+#include "rr_vita_worker.h"
+#define glFinish() rr_gxm_finish()
+#else
 #include <GL/gl.h>
+#endif
 #include "rr_scene.h"
 #include "rr_lift_rt.h"
 #include "rr_lifted.h"
@@ -257,11 +264,44 @@ static uint32_t slice, serial_acc;
 bool g_rr_in_vblank;
 static int vblank_slices;
 
+#ifdef __vita__
+static rr_vita_worker sound_worker;
+static uint64_t sound_work_us, mix_work_us;
+static void sound_job(void *arg) {
+    (void)arg;
+    uint64_t start = sceKernelGetProcessTimeWide();
+    rr_sound_slice();
+    uint64_t mixed = sceKernelGetProcessTimeWide();
+    rr_audio_slice();
+    sound_work_us = mixed - start;
+    mix_work_us = sceKernelGetProcessTimeWide() - mixed;
+}
+static void close_sound_worker(void) { rr_worker_close(&sound_worker); }
+static void start_sound_job(void) {
+    static bool attempted;
+    if (!attempted) {
+        attempted = true;
+        bool ok = rr_worker_init(&sound_worker, "rr_sound_mix", SCE_KERNEL_CPU_MASK_USER_2);
+        VLOG("[SOUND_WORKER] thread=%d affinity=USER_2 enabled=%d\n", sound_worker.thread, ok);
+        atexit(close_sound_worker);
+    }
+    rr_worker_dispatch(&sound_worker, sound_job, NULL);
+}
+#endif
+
 void rr_tick(void)
 {
     rd_budget_out();
     rr_budget = polls_per_frame / SLICES;
     if (in_irq) { rr_budget = 1000; return; }      /* finish the handler first */
+#ifdef __vita__
+    static uint64_t previous_end, cpu_us, dsp_us, sound_us, audio_us, video_us, host_us;
+    uint64_t tick_start = sceKernelGetProcessTimeWide();
+    if (previous_end) cpu_us += tick_start - previous_end;
+    /* Sound uses shared RAM/C352; DSP uses polygon/point RAM. The 68K
+     * remains paused here, and resumes only after both devices complete. */
+    start_sound_job();
+#endif
     g_rr_in_vblank = vblank_slices > 0;
     if (vblank_slices > 0) {                       /* split the vblank slice at VBEND */
         long vb = DSP_STEPS_PER_FRAME * 45 / 525 - (long)(2 - vblank_slices) * (DSP_STEPS_PER_FRAME / SLICES);
@@ -274,8 +314,24 @@ void rr_tick(void)
         vblank_slices--;
     } else
         rr_dsp_run(DSP_STEPS_PER_FRAME / SLICES);
-    rr_sound_slice();                              /* the sound program's share of this slice */
-    rr_audio_slice();                              /* and the mixer's samples */
+#ifdef __vita__
+    uint64_t dsp_end = sceKernelGetProcessTimeWide();
+    dsp_us += dsp_end - tick_start;
+#endif
+#ifdef __vita__
+    rr_worker_join(&sound_worker);
+    uint64_t audio_end = sceKernelGetProcessTimeWide();
+    sound_us += sound_work_us;
+    audio_us += mix_work_us;
+    static uint64_t device_us, join_us, wake_us;
+    if (sound_worker.thread >= 0) wake_us += sound_worker.started_us - sound_worker.dispatched_us;
+    device_us += audio_end - tick_start;
+    join_us += audio_end - dsp_end;
+    previous_end = audio_end;
+#else
+    rr_sound_slice();
+    rr_audio_slice();
+#endif
     serial_acc += 100;                             /* 100 Hz serial pulse */
     if (serial_acc >= 60 * SLICES) { serial_acc -= 60 * SLICES; rr_dsp_serial(); }
     if (++slice % SLICES) return;
@@ -291,6 +347,10 @@ void rr_tick(void)
     }
 #ifdef RR_ORACLE
     else if (!g_rr_gl) rr_video_frame(rr_dsp_slave_active());
+#endif
+#ifdef __vita__
+    uint64_t video_end = sceKernelGetProcessTimeWide();
+    video_us += video_end - audio_end;
 #endif
     if (perf_on) {
         double t1 = now_ms();
@@ -308,6 +368,20 @@ void rr_tick(void)
             if (!rr_host_frame()) { perf_report(); rr_audio_close(); rr_host_close(); fprintf(stderr, "[RR] window closed at frame %u\n", frame); exit(0); }
         } while (rr_host_paused());
     }
+#ifdef __vita__
+    previous_end = sceKernelGetProcessTimeWide();
+    host_us += previous_end - video_end;
+    if (frame % 60 == 0) {
+        VLOG("[DEVICES] ms/frame parallel=%.2f join=%.2f wake=%.2f core=%d (sound/mix overlap DSP)\n",
+             device_us / 60000.0, join_us / 60000.0, wake_us / 60000.0, sound_worker.cpu_id);
+        device_us = join_us = wake_us = 0;
+        VLOG("[TIMING] ms/frame cpu=%.2f dsp=%.2f sound=%.2f mix=%.2f prepare=%.2f draw=%.2f\n",
+            cpu_us / 60000.0, dsp_us / 60000.0, sound_us / 60000.0,
+            audio_us / 60000.0, video_us / 60000.0, host_us / 60000.0);
+        cpu_us = dsp_us = sound_us = audio_us = video_us = host_us = 0;
+        previous_end = sceKernelGetProcessTimeWide();
+    }
+#endif
     rr_input_frame(frame);                         /* replay overrides, recorder logs */
     if (perf_on) t_frame_start = now_ms();
     if (shot_dir && shot_every && frame % shot_every == 0) {
@@ -327,11 +401,17 @@ void rr_tick(void)
                      every = e && atoi(e) > 0 ? (unsigned)atoi(e) : 60; from = f ? (unsigned)atoi(f) : 0; init = 1; }
         if ((frame >= from && frame % every == 0) || frame == max_frames) dump_state();
     }
-    if (frame % 60 == 0)
+    if (frame % 60 == 0 || frame <= 10) {
+        VLOG("[RR] frame %u  traps %u  unmapped %u  romwrites %u  irqs %u/%u/%u/%u/%u/%u/%u  en %02X pc_sr %04X\n",
+                frame, n_traps, g_rr.n_unmapped, g_rr.n_romwrite, n_irq[1], n_irq[2], n_irq[3], n_irq[4], n_irq[5], n_irq[6], n_irq[7],
+                g_hw.irq_enabled, (unsigned)get_sr());
         fprintf(stderr, "[RR] frame %u  traps %u  unmapped %u  romwrites %u  irqs %u/%u/%u/%u/%u/%u/%u  en %02X pc_sr %04X\n",
                 frame, n_traps, g_rr.n_unmapped, g_rr.n_romwrite, n_irq[1], n_irq[2], n_irq[3], n_irq[4], n_irq[5], n_irq[6], n_irq[7],
                 g_hw.irq_enabled, (unsigned)get_sr());
-    if (frame % 60 == 0) { char b[256]; rr_dsp_debug(b, sizeof b); fprintf(stderr, "     %s\n", b); }
+        char b[256]; rr_dsp_debug(b, sizeof b);
+        VLOG("     %s\n", b);
+        fprintf(stderr, "     %s\n", b);
+    }
     if (frame >= max_frames) {
         dump_state();
         perf_report();
@@ -406,7 +486,12 @@ int main(int argc, char **argv)
     if (rec_path && !rr_input_record_start(rec_path)) return 2;
     g_rr_gl = use_gl < 0 ? (windowed != 0) : use_gl;
     if (windowed) {
-        if (!rr_host_open(windowed > 0 ? windowed : 0)) return 2;
+        VLOG("[MAIN] Calling rr_host_open...\n");
+        if (!rr_host_open(windowed > 0 ? windowed : 0)) {
+            VLOG("[MAIN] FATAL: rr_host_open failed!\n");
+            return 2;
+        }
+        VLOG("[MAIN] rr_host_open OK!\n");
         max_frames = 0xFFFFFFFFu;
     } else if (g_rr_gl) {
         const char *e = getenv("RR_RENDER_SIZE"); int w, h;
@@ -418,9 +503,33 @@ int main(int argc, char **argv)
     /* First run: take the ROMs out of MAME's raverace.zip + namcoc74.zip if the ROM
      * folder is incomplete (src/rr_romzip.c) -- how the Windows build is set up;
      * chips unzipped loose into roms/ work too. */
+#ifdef __vita__
+    const char *vita_dirs[] = {
+        "app0:/roms",
+        "app0:roms",
+        "ux0:/app/RAVERACER/roms",
+        "ux0:app/RAVERACER/roms",
+        "roms",
+        "ux0:/data/raverace",
+        "ux0:data/raverace",
+        NULL
+    };
+    for (int i = 0; vita_dirs[i]; i++) {
+        const char *miss = rr_romzip_missing(vita_dirs[i]);
+        VLOG("[MAIN] Check ROM path '%s': %s\n", vita_dirs[i], miss ? miss : "COMPLETE");
+        if (!miss) {
+            rom_dir = vita_dirs[i];
+            break;
+        }
+    }
+#else
     if (rr_romzip_missing(rom_dir) && !strcmp(rom_dir, "extracted") && !rr_romzip_missing("roms"))
         rom_dir = "roms";
+#endif
+    VLOG("[MAIN] Selected rom_dir = '%s'\n", rom_dir);
     if (rr_romzip_missing(rom_dir)) {
+        VLOG("[MAIN] FATAL: ROMs missing in '%s' (first missing: %s)\n",
+             rom_dir, rr_romzip_missing(rom_dir));
         char err[512], *base = SDL_GetBasePath();
         if (!rr_romzip_autosetup(rom_dir, base, err, sizeof err)) {
             fprintf(stderr, "Rave Racer needs its ROMs: %s\n", err);
@@ -437,9 +546,16 @@ int main(int argc, char **argv)
         }
         SDL_free(base);
     }
-    if (!rr_load_program(rom_dir)) return 2;
+    VLOG("[MAIN] Calling rr_load_program('%s')...\n", rom_dir);
+    if (!rr_load_program(rom_dir)) {
+        VLOG("[MAIN] FATAL: rr_load_program failed!\n");
+        return 2;
+    }
+    VLOG("[MAIN] Calling rr_audio_init('%s')...\n", rom_dir);
     rr_audio_init(rom_dir);
+    VLOG("[MAIN] Calling rr_sound_init('%s')...\n", rom_dir);
     rr_sound_init(rom_dir);
+    VLOG("[MAIN] Calling rr_hw_init('%s')...\n", rom_dir);
     rr_hw_init(rom_dir);
     if (freeplay >= 0) rr_hw_set_freeplay(freeplay);
     else if (windowed && g_cfg_freeplay >= 0) {        /* the saved menu choice, windowed runs only */
@@ -450,17 +566,26 @@ int main(int argc, char **argv)
     if (!g_rr_gl && !rr_video_init(rom_dir)) fprintf(stderr, "[RR] video ROMs missing\n");
 #endif
     if (g_rr_gl) {
-        if (!rr_gl_init(rom_dir)) { fprintf(stderr, "[RR] video ROMs missing\n"); return 2; }
+        VLOG("[MAIN] Calling rr_gl_init('%s')...\n", rom_dir);
+        if (!rr_gl_init(rom_dir)) {
+            VLOG("[MAIN] FATAL: rr_gl_init failed!\n");
+            fprintf(stderr, "[RR] video ROMs missing\n");
+            return 2;
+        }
+        VLOG("[MAIN] rr_gl_init OK!\n");
         if (windowed) gl_ok = true;             /* the window's context */
     }
     memset(R, 0, sizeof R);
     RS4(REG_SP, rr_read(0, 4));                 /* reset SP from vector 0 */
     set_sr(0x2700);                             /* supervisor, IPL 7 */
     rr_budget = polls_per_frame / SLICES;
+    VLOG("[MAIN] reset: SP=%08X PC=%08X\n", (uint32_t)RG4(REG_SP), rr_read(4, 4));
     fprintf(stderr, "[RR] reset: SP=%08X PC=%08X\n", (uint32_t)RG4(REG_SP), rr_read(4, 4));
     rr_call_push(0xFFFFFFFEu);                  /* bottom of the shadow stack */
     { extern void rd_init(void); rd_init(); }   /* readable-C replacements (src/rd) */
+    VLOG("[MAIN] Starting lifted program entry_reset (L_4000)...\n");
     L_4000();                                   /* entry_reset: never returns */
+    VLOG("[MAIN] entry_reset returned?!\n");
     fprintf(stderr, "[RR] entry_reset returned?!\n");
     return 1;
 }

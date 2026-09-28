@@ -18,4 +18,7 @@ typedef struct {
 
 /* Returns the number of primitives walked. */
 int eng_walk_list(eng_word_fn pw, const eng_list_cfg *cfg, geo_quad_cb cb, void *user);
+/* Collect immutable per-object camera state without executing geometry. */
+typedef void (*eng_object_cb)(int32_t code, const geo_view *view, void *user);
+int eng_walk_objects(eng_word_fn pw, const eng_list_cfg *cfg, eng_object_cb cb, void *user);
 #endif

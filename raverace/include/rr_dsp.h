@@ -17,5 +17,6 @@ uint16_t rr_dsp_pdp_base(void);
 bool rr_dsp_slave_active(void);
 void rr_dsp_debug(char *buf, int n);
 int32_t rr_dsp_pointram_read(uint32_t a);
+void rr_dsp_copy_pointram(uint32_t *dst); /* C71_PTRAM_WORDS, caller pauses emulation */
 
 #endif
