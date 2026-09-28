@@ -49,31 +49,7 @@ static void poly_w24(c71_t *d, uint32_t i, uint32_t v)
     mark(d, i & 0x7FFF);
 }
 
-/* the 16-bit banked window onto polygon RAM (MAME namcos22_dspram16_r/w) */
-static uint16_t dsp_r(c71_t *d, uint32_t off)
-{
-    uint32_t v = d->poly[off & 0x7FFF];
-    switch (d->bank & 3) {
-    case 0: return v & 0xFFFF;
-    case 1: return (v >> 16) & 0xFFFF;
-    case 2: d->latch = (v >> 16) & 0xFFFF; return v & 0xFFFF;
-    default: return 0;
-    }
-}
-
-static void dsp_w(c71_t *d, uint32_t off, uint16_t data)
-{
-    uint32_t v = d->poly[off & 0x7FFF];
-    uint16_t lo = v & 0xFFFF, hi = (v >> 16) & 0xFFFF;
-    switch (d->bank & 3) {
-    case 0: lo = data; break;
-    case 1: hi = data; break;
-    case 2: lo = data; hi = d->latch; break;
-    default: break;
-    }
-    d->poly[off & 0x7FFF] = ((uint32_t)hi << 16) | lo;
-    mark(d, off & 0x7FFF);
-}
+#include "c25_poly_bus.h"
 
 /* MAME pdp_handle_commands, memory effects only */
 static void pdp_run(c71_t *d)
@@ -135,7 +111,7 @@ static void pdp_run(c71_t *d)
 static uint16_t dr0(c71_t *d, uint32_t a)
 {
     a &= 0xFFFF;
-    if (a >= 0x8000) return dsp_r(d, a - 0x8000);
+    if (a >= 0x8000) return c25_poly_read16(d, a - 0x8000);
     if (a >= 0x4000) return d->prog[a];
     if (a == 4) return d->imr;
     if (a == 2) return d->tim;
@@ -151,7 +127,7 @@ void c25_dw(c71_t *d, uint32_t a, uint32_t v)
     if (a == 2) d->tim = v;
     if (a == 3) d->prd = v;
     if (a == 4) d->imr = v;
-    if (a >= 0x8000) dsp_w(d, a - 0x8000, v);
+    if (a >= 0x8000) c25_poly_write16(d, a - 0x8000, v);
     else if (a >= 0x4000) d->prog[a] = v;
     else d->ram[a] = v;
 }

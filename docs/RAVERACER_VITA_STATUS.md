@@ -1,3 +1,12 @@
+## Native DSP stages — 2026-09-29
+
+- Native fixed-point matrix and object-record stages replace instruction dispatch at thirteen reviewed entry points; CPU doorbell waits are accounted algebraically. Guarded fallback preserves unsupported program/mode/timer/IRQ behavior. Shared inline banked polygon bus retains original latches and write tracking. Original instruction runner remains available.
+- User identified wasted track-selection time in the test. Corrected script releases and presses the accelerator through selection, reaches grid around frame480 rather than1020, holds throttle from600, and stops at1800. Speed is nonzero from720. Final comparison uses moving frames1200–1800; do not compare these inputs directly with the old CPU/grid benchmark.
+- Same-binary original/native DSP A/B: **19.790 -> 4.870 ms/frame, 75.4% reduction** across11 moving-race windows. All30 state CRC/budget/geometry checkpoints and mode/speed diagnostics match; no runtime fault. Post-boot sequence16.620 ->4.835ms (70.9%). This is DSP component time, not total FPS; rendering/sound remain. Opening driving segment, not a complete lap.
+- Host ASan/UBSan:1721 native cases +1919 guard fallbacks match complete DSP state/polygon RAM;12 captured-grid replays match full DSP memories/registers/direct-render output,34452 guest instructions native. Shared bus also passes4202 original linked-runner comparisons. Vita build and diff check pass.
+- Installed and readback-verified on Vita TV192.168.100.158 via Companion: `native-dsp-kernels-2`, SHA256 `94cd6a86109ed15d973b0c83cda8dc1113cb3d92eb10b72341f321d381baf0f8`. Native CPU remains enabled. Benchmark/legacy/profile markers removed; normal play restored. No manual install needed.
+- Details: `docs/RAVERACER_DSP_ARCHITECTURE.md`, `docs/RAVERACER_DSP_BENCHMARK.csv`. Logs `/tmp/raverace-dsp-moving-baseline.log`, `/tmp/raverace-dsp-moving-native.log`. Native-CPU-only rollback `/tmp/raverace-native-cpu-good.eboot.bin`. DSP fallback marker `ux0:/data/raverace_dsp_legacy.enable`; benchmark/profile markers must stay absent for normal play.
+
 ## Native CPU controller — 2026-09-29
 
 - Fork: `chanunnaki/namco22-decompile`, branch `codex/vita-native`; origin is the fork, upstream push disabled. Fork baseline commit `d12fe1d`.

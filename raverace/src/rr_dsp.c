@@ -22,6 +22,7 @@
 #include "rr_dsp.h"
 #include "rr_video.h"
 #include "rr_scene.h"
+#include "rr_dsp_state.h"
 
 int32_t  *g_pointrom;
 uint32_t  g_pointrom_words;
@@ -49,6 +50,43 @@ static void slave_w(uint16_t v)          /* upload_code_to_slave_dsp_w: only the
     } else if (upload_state == 1) upload_state = 2;   /* destination, then data until port 3 read */
 }
 static uint32_t seen_begins;
+
+#ifdef __vita__
+static int profile_on;
+static int native_on=1;
+static uint64_t native_instructions;
+int rr_dsp_native_run(c71_t *, long);
+static uint32_t profile_hits[0x10000], profile_iters[0x10000];
+static unsigned profile_pc;
+static void profile_pre(c71_t *d, int pc) { (void)d; profile_pc=(unsigned)pc; profile_hits[profile_pc]++; }
+static void profile_iter(void) { profile_iters[profile_pc]++; }
+#endif
+
+void rr_dsp_capture_frame(unsigned frame)
+{
+#ifdef __vita__
+    if (!profile_on || !m) return;
+    if (frame == 1020) {
+        memset(profile_hits,0,sizeof profile_hits); memset(profile_iters,0,sizeof profile_iters);
+    }
+    if (frame == 1080) {
+        extern void vita_log(const char *, ...);
+        FILE *f=fopen("ux0:/data/raverace_dsp_state.bin","wb");
+        int ok=f && rr_dsp_state(f,m,1); if(f)fclose(f);
+        vita_log("[DSP_CAPTURE] frame=%u saved=%d pc=%04x\n",frame,ok,m->pc);
+        f=fopen("ux0:/data/raverace_dsp_profile.csv","w");
+        if(f) {
+            fprintf(f,"pc,op,next,hits,iterations\n");
+            for(unsigned i=0;i<0x10000;i++)if(profile_hits[i])
+                fprintf(f,"%04x,%04x,%04x,%u,%u\n",i,m->prog[i],m->prog[(i+1)&65535],profile_hits[i],profile_iters[i]);
+            fclose(f);
+        }
+    }
+#else
+    (void)frame;
+#endif
+}
+
 
 static bool load_pointrom(const char *dir)
 {
@@ -101,6 +139,13 @@ bool rr_dsp_init(const char *dir)
     { const char *e = getenv("RR_C25"); if (e && !strcmp(e, "oracle")) { c25_oracle_use(m); fprintf(stderr, "[DSP] master program: the interpreter ORACLE\n"); } }
 #endif
     m->render_w = render_w; m->render_reset = render_reset; m->pdp_begin = pdp_begin; m->slave_w = slave_w; m->port3_r = port3_r;
+#ifdef __vita__
+    FILE *legacy=fopen("ux0:/data/raverace_dsp_legacy.enable","rb");
+    if(legacy){fclose(legacy);native_on=0;}
+    {extern void vita_log(const char *, ...);vita_log("[DSP_NATIVE] enabled=%d\n",native_on);}
+    FILE *prof=fopen("ux0:/data/raverace_dsp_profile.enable","rb");
+    if(prof) {fclose(prof);profile_on=1;c25_hook_pre=profile_pre;c25_hook_iter=profile_iter;}
+#endif
     return true;
 }
 
@@ -126,15 +171,14 @@ void rr_dsp_run(long steps)
 {
     if (!m || !running || faulted) return;
 #ifdef __vita__
-    /* Experimental linked runner is opt-in until the reported grid movement
-     * is resolved. Default to the previously accepted step execution. */
+    /* Retained linked-runner experiment; native kernels take precedence. */
     static int linked = -1;
     if (linked < 0) {
         FILE *f = fopen("ux0:/data/raverace_linked_dsp.enable", "rb");
         linked = f != NULL;
         if (f) fclose(f);
     }
-    if (linked) {
+    if (linked && !native_on) {
         extern bool rr_c25_exec_run(c71_t *, long);
         if (!rr_c25_exec_run(m, steps)) {
             fprintf(stderr, "[DSP] master stopped at %04X: %s\n", m->cur_pc, m->error);
@@ -144,6 +188,10 @@ void rr_dsp_run(long steps)
     }
 #endif
     while (steps > 0) {
+#ifdef __vita__
+        int consumed = native_on ? rr_dsp_native_run(m, steps) : 0;
+        if(consumed) {steps-=consumed;native_instructions+=(unsigned)consumed;continue;}
+#endif
         if (m->idle) {
             /* If idling and no unmasked pending interrupt, fast-forward timer */
             if (m->intm || !(m->ifr & m->imr)) {
@@ -195,6 +243,11 @@ void rr_dsp_copy_pointram(uint32_t *dst)
 void rr_dsp_debug(char *buf, int n)
 {
     if (!m) { snprintf(buf, n, "dsp: none"); return; }
+#ifdef __vita__
+    {extern void vita_log(const char *, ...);
+     vita_log("[DSP_NATIVE] accounted instructions=%llu\n",(unsigned long long)native_instructions);
+     native_instructions=0;}
+#endif
     snprintf(buf, n, "dsp: ctrl %02X run %d irq %d slave %d fault %d pc %04X idle %d imr %X ifr %X intm %d pdp %u steps %llu",
              ctrl, running, irq_on, slave_on, faulted, m->pc, m->idle, m->imr, m->ifr, m->intm, m->pdp_begins,
              (unsigned long long)m->steps);

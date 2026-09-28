@@ -1,0 +1,31 @@
+frame,workload,legacy_dsp_ms,native_dsp_ms,quads,speed_raw,matching_state_and_budget
+60,startup/selection/grid/acceleration,0.26,0.24,0,65535,regs=70b198fd wram=4e25f544 poly=7ee8cdcd shared=011ffca6 budget=5187
+120,startup/selection/grid/acceleration,10.26,12.62,2,0,regs=ae40b1a6 wram=5a8e3813 poly=dee2b5fd shared=fe2fca33 budget=3215
+180,startup/selection/grid/acceleration,6.3,3.97,666,0,regs=79d0b508 wram=01865a9e poly=139af85c shared=0913bf88 budget=3623
+240,startup/selection/grid/acceleration,5.39,2.18,36,0,regs=8099ca4b wram=60479345 poly=269293eb shared=7423e398 budget=3629
+300,startup/selection/grid/acceleration,5.26,2.93,93,0,regs=7f3681f2 wram=7d373bb3 poly=ac44aad7 shared=11aae19a budget=3629
+360,startup/selection/grid/acceleration,4.97,2.72,65,0,regs=73f4dc90 wram=1512ccf5 poly=7e423605 shared=99b11ca2 budget=3629
+420,startup/selection/grid/acceleration,4.93,2.72,64,0,regs=658cf2d6 wram=824677e2 poly=7e3b5eca shared=07151818 budget=3629
+480,startup/selection/grid/acceleration,12.62,4.73,2057,0,regs=9c92726f wram=c1d49f99 poly=b2ae3c1a shared=25568bca budget=3629
+540,startup/selection/grid/acceleration,11.73,6.23,2056,0,regs=af48c2fa wram=7e6425af poly=ef2d66ce shared=41eabd23 budget=3629
+600,startup/selection/grid/acceleration,11.66,6.18,2057,0,regs=fe025979 wram=5d2116a6 poly=3f10693f shared=266884c2 budget=3629
+660,startup/selection/grid/acceleration,11.8,6.21,2057,0,regs=53842444 wram=851f0a0e poly=f0104cc3 shared=16f64683 budget=3629
+720,startup/selection/grid/acceleration,18.79,6.49,1925,102,regs=b437230c wram=6a133061 poly=a34a23ab shared=f21c5137 budget=3629
+780,startup/selection/grid/acceleration,21.48,6.02,1591,345,regs=9ba67cc2 wram=fc78129d poly=d915b481 shared=747fc26c budget=3629
+840,startup/selection/grid/acceleration,20.15,4.86,1111,1281,regs=1fddf9cb wram=048036ec poly=0f4c5282 shared=5a6d65a7 budget=3629
+900,startup/selection/grid/acceleration,19.1,4.2,1088,2163,regs=04ef5597 wram=4a992304 poly=8dbc9a55 shared=ac233ad4 budget=3629
+960,startup/selection/grid/acceleration,18.73,4.36,1159,2612,regs=a9e56271 wram=71a2e2c0 poly=bafe29ea shared=bf5619fa budget=3629
+1020,startup/selection/grid/acceleration,16.33,4.6,1101,3072,regs=1720a7a4 wram=1efff948 poly=2a8c14f5 shared=ef10df38 budget=3629
+1080,startup/selection/grid/acceleration,16.58,4.69,1283,3518,regs=aec4ac3d wram=d870aa73 poly=26c994b4 shared=c6ee02c4 budget=3629
+1140,startup/selection/grid/acceleration,16.46,4.73,1299,4036,regs=38898f53 wram=1421fbed poly=ec14891b shared=ac66b08a budget=3629
+1200,moving race,16.36,4.71,1349,4573,regs=1a01b69f wram=ce782db8 poly=925500bd shared=fc51f1ab budget=3628
+1260,moving race,16.62,4.81,1362,4979,regs=3be0e5ca wram=56c52c08 poly=639955ef shared=0ccb534f budget=3629
+1320,moving race,16.62,4.88,1089,5375,regs=71b5cefe wram=63ef57a4 poly=3d66a58a shared=21e39696 budget=3629
+1380,moving race,18.78,5.09,1196,3592,regs=f37cbbd2 wram=c2e3fa81 poly=26d3b4fe shared=7471cade budget=3629
+1440,moving race,20.72,5.37,1239,4136,regs=bb38073f wram=1b35e842 poly=8b2f6293 shared=6cbd5cb1 budget=3628
+1500,moving race,20.04,5.06,1072,3584,regs=b897b752 wram=537f4624 poly=b3862363 shared=50780fd2 budget=3629
+1560,moving race,19.71,4.87,999,4156,regs=9a50d4b2 wram=75e06b18 poly=c81715e8 shared=1210d636 budget=3629
+1620,moving race,19.91,4.76,1077,4670,regs=8628f258 wram=d5882e01 poly=0bedf576 shared=28a8401f budget=3629
+1680,moving race,19.84,4.87,1038,5140,regs=1f22c685 wram=a48d8e3b poly=4f65796d shared=1703fb9e budget=3628
+1740,moving race,19.79,4.87,1119,3633,regs=649315f2 wram=4a3a1a61 poly=ce77992d shared=f91a7ae8 budget=3629
+1800,moving race,19.97,4.9,1006,4328,regs=bcd55dec wram=5485fbfa poly=175bf7d3 shared=1271f098 budget=3629

@@ -87,12 +87,22 @@ if(VITA OR CMAKE_SYSTEM_NAME STREQUAL "PSVita")
     COMMENT "Connecting the event-driven CPU controller")
   set_source_files_properties(${RR_NATIVE_LIFT} PROPERTIES COMPILE_OPTIONS "-O1;-w")
 
+  set(RR_NATIVE_DSP ${CMAKE_CURRENT_BINARY_DIR}/rr_dsp_native.c)
+  add_custom_command(OUTPUT ${RR_NATIVE_DSP}
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/gen/dsp_native.py
+            --roms ${CMAKE_CURRENT_SOURCE_DIR}/extracted --out ${RR_NATIVE_DSP}
+    DEPENDS tools/gen/dsp_native.py
+            extracted/rv2_prguub.6d extracted/rv2_prgumb.8d
+            extracted/rv2_prglmb.2d extracted/rv2_prgllb.4d
+    COMMENT "Compiling native DSP matrix and object-record kernels")
+
   set(RR_VITA_SRC
       src/rr_romzip.c
       src/rr_main.c
       src/rr_mem.c
       src/rr_hw.c
       src/rr_dsp.c
+      ${RR_NATIVE_DSP}
       ${NAMCO22_ENGINE_C25_SRC}
       gen/rr_c25.c
       gen/rr_c25_run.c

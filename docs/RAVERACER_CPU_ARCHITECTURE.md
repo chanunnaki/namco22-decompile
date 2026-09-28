@@ -45,13 +45,20 @@ covers small budgets, the normal slice budget, initial expired budgets, counter
 wraparound, signed gate values, RAM mirrors and interrupt register changes.
 
 For an on-device A/B test, create `ux0:/data/raverace_cpu_bench.enable`. Both
-controllers then receive identical inputs: coin at frame 180, gas at 240,
-neutral steering, and stop after frame 1200. This mode overrides physical
+controllers then receive identical inputs: coin at frame 180, fresh accelerator
+presses during frames 240–599 to confirm selection, full throttle from frame
+600, neutral steering, and stop after frame 1800. This mode overrides physical
 controls. `[CPU_CHECK]` records register, WRAM, polygon and shared-RAM CRCs plus
 the remaining budget every 60 frames. `[TIMING] cpu` measures the CPU portion;
 it must not be confused with total frame time. Remove the benchmark marker for
 normal play. `[CPU_EVENTS]` counts wait instructions accounted for without
 executing their repetitions.
+
+The original CPU measurement below used an older script that held the
+accelerator continuously from frame 240 and stopped at frame 1200. It waited
+for the selection timeout. DSP development corrected this sequence and added
+`[BENCH_RACE]` mode/menu/speed diagnostics; do not compare timings across the
+two input sequences as if they were the same workload.
 
 ## Vita TV measurement (2026-09-29)
 

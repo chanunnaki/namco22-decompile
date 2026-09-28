@@ -393,7 +393,10 @@ void rr_tick(void)
         /* Reproducible A/B workload, opt-in only; replaces physical controls. */
         g_hw.inputs = 0xFEFF;
         if (frame >= 180 && frame < 186) g_hw.inputs &= (uint16_t)~0x1000;
-        g_hw.gas = frame >= 240 ? 0x610 : 0;
+        /* Selection needs fresh pedal edges, not a continuously held pedal.
+         * Confirm the menus, then hold full throttle through the race. */
+        g_hw.gas = (frame >= 600 ||
+                    (frame >= 240 && frame % 60 < 15)) ? 0x610 : 0;
         g_hw.brake = 0; g_hw.steer = 0x800;
     }
 #endif
@@ -411,7 +414,10 @@ void rr_tick(void)
     rr_hw_vblank();
     deliver_irqs();
 #ifdef __vita__
+    rr_dsp_capture_frame(frame);
     if (cpu_bench && frame % 60 == 0) {
+        VLOG("[BENCH_RACE] frame=%u mode=%u menu=%u speed=%u\n",
+             frame, vrd16(0x10008DA0), vrd16(0x1000A332), vrd16(0x1000C022));
         VLOG("[CPU_CHECK] frame=%u regs=%08lx wram=%08lx poly=%08lx shared=%08lx budget=%d\n",
              frame, crc32(0, R, sizeof R), crc32(0, g_rr.wram, sizeof g_rr.wram),
              crc32(0, (const Bytef *)g_rr.poly, sizeof g_rr.poly),
@@ -610,8 +616,8 @@ int main(int argc, char **argv)
     { extern void rr_cpu_init(void); extern int rr_cpu_native;
       rr_cpu_init(); VLOG("[CPU] event-driven controller=%d\n", rr_cpu_native);
       FILE *f = fopen("ux0:/data/raverace_cpu_bench.enable", "rb");
-      if (f) { fclose(f); cpu_bench = 1; max_frames = 1200;
-          VLOG("[CPU_BENCH] scripted coin=180 gas=240 stop=1200\n"); }
+      if (f) { fclose(f); cpu_bench = 1; max_frames = 1800;
+          VLOG("[CPU_BENCH] scripted coin=180 pedal-pulses=240..599 gas=600 stop=1800 race-from=1200\n"); }
     }
 #endif
     VLOG("[MAIN] Starting lifted program entry_reset (L_4000)...\n");
