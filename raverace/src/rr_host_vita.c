@@ -69,7 +69,7 @@ int  rr_host_joytest(void) { return 0; }
 bool rr_host_open(int scale) {
     (void)scale;
 
-    vita_log("[BUILD] presentation-trace-4\n");
+    vita_log("[BUILD] gpu-native-textures-3\n");
 
     // Maximize Vita performance profile (444 MHz CPU, 222 MHz GPU)
     scePowerSetArmClockFrequency(444);

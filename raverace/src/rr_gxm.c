@@ -689,6 +689,11 @@ static void draw_snapshot(int vw, int vh) {
     }
 
     uint64_t palette_us = sceKernelGetProcessTimeWide();
+    if(packet_mode){
+        quad_gxm_begin_bank_plan();
+        for(int i=0;i<qn;i++)quad_gxm_add_bank_plan(draw_packets[i].vertices,draw_packets[i].count);
+        quad_gxm_finish_bank_plan();
+    }
     /* Begin GXM scene via vita2d */
     vita2d_start_drawing();
     uint64_t scene_us = sceKernelGetProcessTimeWide();

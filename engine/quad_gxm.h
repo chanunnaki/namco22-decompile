@@ -49,6 +49,9 @@ void eng_draw_begin(void);
 void eng_draw_quad(const geo_quad *q, const eng_draw_cfg *cfg);
 void eng_draw_end(void);
 bool quad_gxm_packets_ready(void);
+void quad_gxm_begin_bank_plan(void);
+void quad_gxm_add_bank_plan(const eng_batch_vertex *vertices,unsigned count);
+void quad_gxm_finish_bank_plan(void);
 unsigned quad_gxm_compile(const geo_quad *q, const eng_draw_cfg *cfg,
                           eng_batch_vertex *out, unsigned capacity);
 void quad_gxm_append_packet(const eng_batch_vertex *vertices, unsigned count);

@@ -66,6 +66,8 @@ static bool batch_texture(SceGxmTexture *tex, void *data, SceGxmTextureFormat fm
     sceGxmTextureSetMagFilter(tex, SCE_GXM_TEXTURE_FILTER_POINT);
     return true;
 }
+#include "quad_gxm_banks.inc"
+
 /* Convert tile-major ROM bytes to a spatial 256x256 atlas of 16x16
  * tiles. Reuse 64KB of tilemap staging so VRAM receives contiguous copies. */
 static void batch_pack_rom(uint8_t *rom, uint8_t *scratch, const uint8_t *data) {
@@ -82,6 +84,9 @@ static bool batch_init(void) {
     FILE *disable = fopen("ux0:/data/raverace_batch.disable", "rb");
     if (disable) { fclose(disable); vita_log("[BATCH] disabled by marker\n"); return false; }
     if (!g_texture_data || !g_texture_tilemap) return false;
+    FILE *legacy=fopen("ux0:/data/raverace_scene_decoder.enable","rb");
+    bank_cache_enabled=!legacy;if(legacy)fclose(legacy);
+    vita_log("[NATIVE_BANK] enabled=%d\n",bank_cache_enabled);
     SceGxmProgram *vp = compile_one(batch_v_src, SHARK_VERTEX_SHADER, "batch_v");
     SceGxmProgram *fp = compile_one(batch_f_src, SHARK_FRAGMENT_SHADER, "batch_f");
     if (!vp || !fp) return false;
@@ -105,6 +110,7 @@ static bool batch_init(void) {
             SCE_GXM_MULTISAMPLE_NONE, NULL, vp, &batch_fp) < 0) return false;
     batch_screen = sceGxmProgramFindParameterByName(vp, "uScreen");
     if (!batch_screen) return false;
+    if(bank_cache_enabled && !bank_shader_init(vp))bank_cache_enabled=false;
     size_t vertices_size = (BATCH_VERTICES * sizeof(BatchVertex) + 4095) & ~(size_t)4095;
     size_t index_size = (BATCH_VERTICES * sizeof(uint16_t) + 4095) & ~(size_t)4095;
     batch_frame_stride=BATCH_PAL_BYTES+vertices_size;
@@ -215,7 +221,7 @@ static void batch_end(void) {
     sceGxmReserveVertexDefaultUniformBuffer(s_ctx,&uniform);
     sceGxmSetUniformDataF(uniform,batch_screen,0,4,s_screen_params);
     sceGxmSetVertexStream(s_ctx,0,batch_gpu);
-    int r=sceGxmDraw(s_ctx,SCE_GXM_PRIMITIVE_TRIANGLES,SCE_GXM_INDEX_FORMAT_U16,batch_indices,batch_count);
+    int r=bank_draw();
     extern void vita_log(const char *, ...);
     uint64_t draw_end = sceKernelGetProcessTimeWide();
     static uint64_t build_us, copy_us, submit_us;
@@ -226,5 +232,5 @@ static void batch_end(void) {
         frames=0; build_us=copy_us=submit_us=0;
     }
     if(r<0)vita_log("[BATCH] draw failed %08X\n",r);
-    if(g_eng_frame%60==0)vita_log("[BATCH] triangles=%u draws=1\n",batch_count/3);
+    if(g_eng_frame%60==0)vita_log("[BATCH] triangles=%u\n",batch_count/3);
 }

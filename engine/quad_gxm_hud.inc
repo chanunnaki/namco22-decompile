@@ -32,17 +32,24 @@ static const char hud_f_src[] =
  " return float4(tex2D(uPalette,float2((index+0.5)/256.0,0.5)).rgb,1.0);\n"
  "}\n";
 
+static void hud_atlas_shutdown(void);
 static void hud_shutdown(void) {
+    hud_atlas_shutdown();
     if(hud_fp) sceGxmShaderPatcherReleaseFragmentProgram(s_patcher,hud_fp);
     if(hud_id) sceGxmShaderPatcherUnregisterProgram(s_patcher,hud_id);
     if(hud_memory) sceGxmUnmapMemory(hud_memory);
     if(hud_uid>=0) sceKernelFreeMemBlock(hud_uid);
     hud_fp=NULL;hud_id=0;hud_memory=NULL;hud_uid=-1;hud_active=false;
 }
+#include "quad_gxm_hud_atlas.inc"
+
 static bool hud_init(const SceGxmProgram *vertex) {
     extern void vita_log(const char *, ...);
     FILE *f=fopen("ux0:/data/raverace_hud_legacy.enable","rb");
     if(f){fclose(f);return false;}
+    f=fopen("ux0:/data/raverace_hud_decoder.enable","rb");
+    if(f)fclose(f);
+    else {if(hud_atlas_init(vertex))return true;hud_shutdown();}
     SceGxmProgram *fp=compile_one(hud_f_src,SHARK_FRAGMENT_SHADER,"hud_tilemap_f");
     if(!fp) return false;
     if(sceGxmShaderPatcherRegisterProgram(s_patcher,fp,&hud_id)<0) return false;
@@ -97,6 +104,7 @@ static void hud_upload(size_t offset,const uint8_t *src,size_t count){
 void quad_gxm_upload_hud(const uint8_t *chars,const uint8_t *map,
                          const uint8_t *rgba,unsigned sx,unsigned sy){
     if(!hud_active)return;
+    if(hud_atlas_mode){hud_atlas_upload(chars,map,rgba,sx,sy);return;}
     sceGxmTextureSetData(&hud_chars,hud_memory+s_frame_slot*0x40000);
     sceGxmTextureSetData(&hud_map,hud_memory+s_frame_slot*0x40000+0x20000);
     sceGxmTextureSetData(&hud_palette,hud_memory+s_frame_slot*0x40000+0x22000);
@@ -108,6 +116,7 @@ void quad_gxm_upload_hud(const uint8_t *chars,const uint8_t *map,
 }
 void quad_gxm_draw_native_hud(void){
     if(!hud_active)return;
+    if(hud_atlas_mode){hud_atlas_draw();return;}
     size_t bytes=4*sizeof(GxmQuadVertex);
     if(s_vtx_ring_offset+bytes>VTX_RING_SIZE)return;
     GxmQuadVertex *v=(GxmQuadVertex *)(s_vtx_ring_base+s_vtx_ring_offset);

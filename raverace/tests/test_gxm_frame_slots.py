@@ -3,12 +3,13 @@ from pathlib import Path
 import subprocess,tempfile,os
 root=Path(__file__).resolve().parents[2]
 s=(root/'raverace/src/rr_gxm.c').read_text();a=s.index('static SceGxmNotification frame_fence');b=s.index('static void draw_snapshot',a)
-body=s[a:b]
+body=s[a:b].replace('#include "rr_present_trace.inc"','static uint64_t present_scene_end;')
 hud=(root/'engine/quad_gxm_hud.inc').read_text()
 upload=hud[hud.index('static void hud_upload('):hud.index('void quad_gxm_draw_native_hud')]
 
 prefix=r'''
 #include <stdio.h>
+#include <stdint.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
@@ -19,6 +20,7 @@ static SceGxmContext context,*gxm_context=&context;
 static volatile unsigned region[3];
 static bool busy[3],buffered;
 static unsigned submitted[3],selected,waits,finishes;
+static uint64_t sceKernelGetProcessTimeWide(void){return 0;}
 #define VLOG(...) ((void)0)
 static volatile unsigned *sceGxmGetNotificationRegion(void){return region;}
 static bool quad_gxm_buffered(void){return buffered;}
@@ -40,7 +42,8 @@ storage=r'''
 typedef struct {void *data;} SceGxmTexture;
 static SceGxmTexture hud_chars,hud_map,hud_palette;
 static void sceGxmTextureSetData(SceGxmTexture *t,void *p){t->data=p;}
-static bool hud_active=true,hud_valid[3];
+static bool hud_active=true,hud_valid[3],hud_atlas_mode;
+static void hud_atlas_upload(const uint8_t*c,const uint8_t*m,const uint8_t*p,unsigned x,unsigned y){(void)c;(void)m;(void)p;(void)x;(void)y;abort();}
 static unsigned s_frame_slot;
 static uint8_t hud_memory[3*0x40000],hud_previous[3][0x22400];
 static float hud_offset[2];
