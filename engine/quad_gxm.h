@@ -10,6 +10,8 @@
 #include <psp2/gxm.h>
 #include "geo_hw.h"
 
+#include "quad_packet.h"
+
 #define ENG_SCREEN_W 640
 #define ENG_SCREEN_H 480
 
@@ -46,6 +48,10 @@ void quad_gxm_set_scene_extents(float x0, float x1);
 void eng_draw_begin(void);
 void eng_draw_quad(const geo_quad *q, const eng_draw_cfg *cfg);
 void eng_draw_end(void);
+bool quad_gxm_packets_ready(void);
+unsigned quad_gxm_compile(const geo_quad *q, const eng_draw_cfg *cfg,
+                          eng_batch_vertex *out, unsigned capacity);
+void quad_gxm_append_packet(const eng_batch_vertex *vertices, unsigned count);
 void quad_gxm_draw_text(const SceGxmTexture *tex);
 bool quad_gxm_native_hud(void);
 bool quad_gxm_buffered(void);

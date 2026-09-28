@@ -208,9 +208,13 @@ static int s22_fog_quad(const geo_quad *q, eng_fog *f)
 static geo_quad *qbuf;
 static const uint32_t *draw_order;
 static int       qn, qcap, qorder;
+static bool packet_mode;
+static int packet_enabled=-1;
+static void push_direct_packet(const geo_quad *q);
 
 static void push_quad(const geo_quad *q, void *user) {
     (void)user;
+    if(packet_mode){push_direct_packet(q);return;}
     if (qn == qcap) {
         int nc = qcap ? qcap * 2 : 8192;
         geo_quad *nb = realloc(qbuf, (size_t)nc * sizeof *qbuf);
@@ -437,14 +441,61 @@ static void finish_frame_build(void) {
 /* Geometry lanes use separate engine state and per-object output buffers.
  * Jobs can complete out of order; emission order is restored before sorting. */
 extern unsigned g_geo_lane_frame;
+void geo_lane_native_meshes(int enabled);
 void geo_lane_set_view(const geo_view *view);
 void geo_lane_object(int32_t code, geo_quad_cb cb, void *user);
+typedef struct { unsigned first, count; int32_t zsort; } packet_span;
+typedef struct { const eng_batch_vertex *vertices; unsigned count; int32_t zsort, order; } draw_packet;
+static draw_packet *draw_packets;
+static unsigned draw_packet_capacity;
+static const eng_draw_cfg packet_cfg={.shade=1,.fog=1,.fog_before_shade=1,
+    .fog_quad=s22_fog_quad,.write_prio_alpha=1,.texel_centre=1};
 typedef struct {
     geo_view view;
     int32_t code;
     geo_quad *quads;
     int count, capacity;
+    packet_span *spans;
+    eng_batch_vertex *vertices;
+    unsigned span_capacity, vertex_count, vertex_capacity;
 } geometry_job;
+static geometry_job direct_packets;
+
+static void collect_packet(const geo_quad *q,geometry_job *job){
+    eng_batch_vertex vertices[90];
+    unsigned n=quad_gxm_compile(q,&packet_cfg,vertices,90);
+    if((unsigned)job->count==job->span_capacity){
+        unsigned cap=job->span_capacity?job->span_capacity*2:32;
+        void *p=realloc(job->spans,cap*sizeof *job->spans);if(!p)abort();
+        job->spans=p;job->span_capacity=cap;
+    }
+    if(job->vertex_count+n>job->vertex_capacity){
+        unsigned cap=job->vertex_capacity?job->vertex_capacity*2:256;
+        if(cap<job->vertex_count+n)cap=job->vertex_count+n;
+        void *p=realloc(job->vertices,cap*sizeof *job->vertices);if(!p)abort();
+        job->vertices=p;job->vertex_capacity=cap;
+    }
+    job->spans[job->count++]=(packet_span){job->vertex_count,n,q->zsort};
+    if(n)memcpy(job->vertices+job->vertex_count,vertices,n*sizeof *vertices);
+    job->vertex_count+=n;
+}
+static void push_direct_packet(const geo_quad *q){collect_packet(q,&direct_packets);}
+static void append_packets(const geometry_job *job){
+    if((unsigned)(qn+job->count)>draw_packet_capacity){
+        unsigned cap=(unsigned)(qn+job->count)*2;
+        void *p=realloc(draw_packets,cap*sizeof *draw_packets);if(!p)abort();
+        draw_packets=p;draw_packet_capacity=cap;
+    }
+    for(int i=0;i<job->count;i++){
+        packet_span span=job->spans[i];
+        draw_packets[qn++]=(draw_packet){span.count?job->vertices+span.first:NULL,span.count,span.zsort,qorder++};
+    }
+}
+static int packet_compare(const void *a,const void *b){
+    const draw_packet *x=a,*y=b;
+    if(x->zsort!=y->zsort)return x->zsort>y->zsort?-1:1;
+    return x->order>y->order?-1:x->order<y->order?1:0;
+}
 static geometry_job geometry_jobs[4096];
 static int geometry_count;
 static atomic_int geometry_next;
@@ -456,10 +507,11 @@ static void collect_object(int32_t code, const geo_view *view, void *user) {
     (void)user;
     if (geometry_count == 4096) abort(); /* same bound as the list walker */
     geometry_job *job = &geometry_jobs[geometry_count++];
-    job->code = code; job->view = *view; job->count = 0;
+    job->code = code; job->view = *view; job->count = 0; job->vertex_count=0;
 }
 static void collect_polygon(const geo_quad *q, void *user) {
     geometry_job *job = user;
+    if(packet_mode){collect_packet(q,job);return;}
     if (job->count == job->capacity) {
         int next = job->capacity ? job->capacity * 2 : 32;
         geo_quad *buf = realloc(job->quads, (size_t)next * sizeof *buf);
@@ -500,9 +552,11 @@ static void build_geometry(const eng_list_cfg *cfg) {
     else geometry_lane_jobs[1] = 0;
     geometry_run(NULL);
     rr_worker_join(&geometry_worker);
-    for (int i = 0; i < geometry_count; i++)
-        for (int j = 0; j < geometry_jobs[i].count; j++)
+    for (int i = 0; i < geometry_count; i++) {
+        if(packet_mode)append_packets(&geometry_jobs[i]);
+        else for (int j = 0; j < geometry_jobs[i].count; j++)
             push_quad(&geometry_jobs[i].quads[j], NULL);
+    }
     if (g_eng_frame % 60 == 0)
         VLOG("[GEO_WORKER] objects=%d main=%u worker=%u\n", geometry_count,
              geometry_lane_jobs[0], geometry_lane_jobs[1]);
@@ -523,16 +577,31 @@ static void prepare_snapshot(void) {
     }
     int direct_count = frame_mem.direct_count;
     const bool walk = frame_mem.walk;
+    if(packet_enabled<0){
+        FILE *f=fopen("ux0:/data/raverace_geometry_legacy.enable","rb");
+        packet_enabled=!f;if(f)fclose(f);
+        geo_hw_native_meshes(packet_enabled);geo_lane_native_meshes(packet_enabled);
+        VLOG("[GEOMETRY] worker packets=%d indexed meshes=%d\n",packet_enabled,packet_enabled);
+    }
+    packet_mode=packet_enabled && quad_gxm_packets_ready() && quad_gxm_native_hud();
+    const double aspect=960.0/544.0;
+    const float extent=(float)((NH*aspect-NW)/2.0);
+    quad_gxm_set_scene_extents(-extent,NW+extent);
     qn = 0; qorder = 0;
+    direct_packets.count=0;direct_packets.vertex_count=0;
     for (int i = 0; i < direct_count; i++) direct_quad(frame_mem.direct[i]);
+    if(packet_mode)append_packets(&direct_packets);
     uint64_t walk_start = sceKernelGetProcessTimeWide();
     if (walk) {
         eng_list_cfg cfg = { ENG_LIST_HEAD_S22, 1, NULL, NULL, NULL, NULL };
         build_geometry(&cfg);
     }
     uint64_t sort_start = sceKernelGetProcessTimeWide();
-    draw_order = quad_gxm_sort_indices(qbuf, qn, 0);
-    if (!draw_order) eng_quad_sort(qbuf, qn, 0);
+    if(packet_mode)qsort(draw_packets,qn,sizeof *draw_packets,packet_compare);
+    else {
+        draw_order = quad_gxm_sort_indices(qbuf, qn, 0);
+        if (!draw_order) eng_quad_sort(qbuf, qn, 0);
+    }
     uint64_t prep_end = sceKernelGetProcessTimeWide();
     static uint64_t direct_total, walk_total, sort_total;
     direct_total += walk_start - prep_start;
@@ -620,6 +689,7 @@ static void draw_snapshot(int vw, int vh) {
     uint64_t palette_us = sceKernelGetProcessTimeWide();
     /* Begin GXM scene via vita2d */
     vita2d_start_drawing();
+    uint64_t scene_us = sceKernelGetProcessTimeWide();
 
     /* Clear background color */
     uint8_t bg[3]; pen_rgb(frame_bg_palbase | 0xff, bg);
@@ -643,7 +713,10 @@ static void draw_snapshot(int vw, int vh) {
     dc.texel_centre = 1;
 
     eng_draw_begin();
-    for (int i = 0; i < qn; i++) eng_draw_quad(&qbuf[draw_order ? draw_order[i] : i], &dc);
+    for (int i = 0; i < qn; i++) {
+        if(packet_mode)quad_gxm_append_packet(draw_packets[i].vertices,draw_packets[i].count);
+        else eng_draw_quad(&qbuf[draw_order ? draw_order[i] : i], &dc);
+    }
     eng_draw_end();
 
     uint64_t quads_us = sceKernelGetProcessTimeWide();
@@ -662,10 +735,11 @@ static void draw_snapshot(int vw, int vh) {
     /* End GXM scene via vita2d */
     vita2d_end_drawing();
     uint64_t end_us = sceKernelGetProcessTimeWide();
-    static uint64_t palette_total, quads_total, text_total, gpu_total, layer_total, hud_total, end_total;
+    static uint64_t palette_total, quads_total, text_total, gpu_total, layer_total, hud_total, end_total, begin_total, triangles_total;
     static unsigned samples;
     gpu_total += waited_us-start_us; layer_total += palette_us-waited_us;
     hud_total += hud_us-quads_us; end_total += end_us-hud_us;
+    begin_total += scene_us-palette_us; triangles_total += quads_us-scene_us;
     palette_total += palette_us - start_us;
     quads_total += quads_us - palette_us;
     text_total += end_us - quads_us;
@@ -675,6 +749,8 @@ static void draw_snapshot(int vw, int vh) {
              tex_frame_hits, tex_frame_misses);
         VLOG("[SYNC] ms/frame gpu_wait=%.2f layers_upload=%.2f hud_draw=%.2f scene_end=%.2f\n",
              gpu_total/60000.0,layer_total/60000.0,hud_total/60000.0,end_total/60000.0);
+        VLOG("[SCENE] ms/frame begin=%.2f triangles=%.2f\n",begin_total/60000.0,triangles_total/60000.0);
+        begin_total=triangles_total=0;
         gpu_total=layer_total=hud_total=end_total=0;
         samples = 0;
         palette_total = quads_total = text_total = 0;
@@ -718,14 +794,21 @@ static void render_frame_job(void *arg) {
     (void)arg;
     uint64_t start = sceKernelGetProcessTimeWide();
     prepare_snapshot();
+    uint64_t prepared = sceKernelGetProcessTimeWide();
     draw_snapshot(960, 544);
+    uint64_t drawn = sceKernelGetProcessTimeWide();
     swap_snapshot();
+    uint64_t swapped = sceKernelGetProcessTimeWide();
     atomic_store_explicit(&presented_quads, qn, memory_order_relaxed);
-    static uint64_t work;
+    static uint64_t work, prepare_work, draw_work, swap_work;
     static unsigned samples;
     work += sceKernelGetProcessTimeWide() - start;
+    prepare_work += prepared-start; draw_work += drawn-prepared; swap_work += swapped-drawn;
     if (++samples == 60) {
         VLOG("[PIPELINE] render work=%.2f ms/frame core=%d\n", work/60000.0, sceKernelGetCpuId());
+        VLOG("[RENDER_STAGE] frame=%u prepare=%.2f draw=%.2f present=%.2f\n",g_eng_frame,
+            prepare_work/60000.0,draw_work/60000.0,swap_work/60000.0);
+        prepare_work=draw_work=swap_work=0;
         samples=0; work=0;
     }
 }

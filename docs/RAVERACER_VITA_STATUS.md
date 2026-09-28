@@ -1,3 +1,11 @@
+## Indexed geometry and parallel triangle packets — 2026-09-29
+
+- ROM objects now compile to per-lane indexed meshes; shared positions transform/project once per object invocation. Workers construct finished triangle packets and the renderer sorts lightweight references before uploading. Dynamic point RAM and unsupported objects retain the original walker; original geometry path selectable with `raverace_geometry_legacy.enable`.
+- Same-binary 1800-frame hardware A/B: all 30 state/budget/geometry/speed checkpoints and final triangle counts/CRC match. Geometry stage 12.720 -> 8.660 ms (31.9% reduction), now including worker triangle construction; sort 1.130 -> 0.860 ms. **Overall frame time is effectively unchanged: 40.420 -> 40.400 ms**, roughly 25 FPS. Do not claim geometry savings as an FPS improvement.
+- Final timing build also passes all 30 checkpoints. Preparation 13.43 ms, drawing 6.28 ms, presentation 15.72 ms medians; total frame40.26 ms. Scene begin ~0.05 ms. Remaining delay is localized to presentation/GPU backpressure, not yet distinguished between GPU completion and display queue scheduling. Explicit vita2d vblank wait already disabled. This is the next architectural investigation.
+- Host validation: 200 full scenes match polygon bytes/statistics and parallel triangle bytes/order; 30000 triangles/polygons compiler cases match frozen original; existing clip/math checks pass under sanitizers. Vita build and diff checks pass.
+- Installed `indexed-geometry-packets-2` on Vita TV .158, SHA256 `4770e9a0edf07a196566bb7cde6f3ea1ce21de6bb099d95f390a815cb3e5f15d`; normal controls restored. User visual/FPS feedback pending. Rollback `/tmp/raverace-before-indexed-geometry.eboot.bin`. Evidence in `docs/RAVERACER_GEOMETRY_ARCHITECTURE.md` and `docs/RAVERACER_GEOMETRY_BENCHMARK.csv`.
+
 ## GPU HUD and buffered rendering — 2026-09-29
 
 - Replaced CPU RGBA HUD expansion/upload and its worker dependency with a GPU tilemap decoder. Three independently owned sets of batch vertices, palettes and HUD RAM are protected by fragment-completion notifications; ordinary rendering waits only when reusing its own slot instead of draining the GPU each frame. Existing decoded HUD/serial path remains selectable. No screen-resolution reduction.

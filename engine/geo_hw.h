@@ -104,6 +104,10 @@ extern int       g_bbox_cur;    /* object code being walked, -1 = none */
 
 typedef void (*geo_quad_cb)(const geo_quad *q, void *user);
 
+#if defined(__vita__) || defined(GEO_NATIVE_MESH)
+void geo_hw_native_meshes(int enabled);
+void geo_hw_clear_meshes(void);
+#endif
 void geo_hw_set_view(const geo_view *v);
 void geo_hw_object(int32_t code, geo_quad_cb cb, void *user);
 void geo_hw_zoom_from_dspfloat(uint32_t word, int32_t *mant, int *shift);

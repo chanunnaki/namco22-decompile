@@ -65,10 +65,8 @@ int main(void){
  puts("PASS: 200 parallel scenes match serial polygon bytes and emission order, including lighting and object flags");
 }
 '''
-with tempfile.TemporaryDirectory(prefix='rr-jobs-') as d:
- d=Path(d);inc=d/'psp2/kernel';inc.mkdir(parents=True);(inc/'threadmgr.h').write_text(shim)
- (d/'test.c').write_text(prefix+code+test)
- subprocess.run(['cc','-O2','-fwrapv','-pthread','-U__SIZEOF_INT128__','-fsanitize=address,undefined',
- '-I'+str(d),'-I'+str(root/'engine'),'-I'+str(root/'raverace/include'),str(d/'test.c'),
- *[str(root/'engine'/f) for f in ['eng.c','geo_hw.c','geo_hw_lane.c','slave_list.c']],'-o',str(d/'test')],check=True)
- subprocess.run([str(d/'test')],check=True,env={**os.environ,'UBSAN_OPTIONS':'halt_on_error=1'})
+# Keep this entry point and its synthetic scene fixture for existing workflows.
+# The expanded test also validates indexed meshes and worker-built packets.
+if __name__ == '__main__':
+    import runpy
+    runpy.run_path(str(root/'raverace/tests/test_geometry_packets.py'), run_name='__main__')

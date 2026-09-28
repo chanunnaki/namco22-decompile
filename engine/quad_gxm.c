@@ -7,6 +7,7 @@
 #include <string.h>
 #include <time.h>
 #include <math.h>
+#include <zlib.h>
 #include <psp2/kernel/sysmem.h>
 #include <psp2/kernel/clib.h>
 #include <psp2/kernel/processmgr.h>

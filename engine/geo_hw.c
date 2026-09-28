@@ -343,6 +343,12 @@ void geo_hw_zoom_from_dspfloat(uint32_t word, int32_t *mant, int *shift)
  * defect TEXTURE_PIPELINE_BUGS.md records as Bug 2, and it is why the
  * existing renderer draws the wrong geometry.
  */
+#if defined(__vita__) || defined(GEO_NATIVE_MESH)
+#define GEO_HAVE_MESH 1
+static void quad_fixed(int32_t,uint32_t,int32_t,int32_t,int32_t,geo_quad_cb,void *);
+#include "geo_mesh.inc"
+#endif
+
 static void quad_fixed(int32_t color, uint32_t addr, int32_t polyshift,
                        int32_t flags, int32_t packetformat,
                        geo_quad_cb cb, void *user)
@@ -352,15 +358,29 @@ static void quad_fixed(int32_t color, uint32_t addr, int32_t polyshift,
 
     int32_t vx[4], vy[4], vz[4];
     for (int i = 0; i < 4; i++) {
+#ifdef GEO_HAVE_MESH
+        mesh_vertex *cached=mesh_current?&mesh_active->vertices[mesh_current->indices[i]]:NULL;
+        if(cached && cached->stamp==mesh_active->generation){
+            vx[i]=cached->vx;vy[i]=cached->vy;vz[i]=cached->vz;continue;
+        }
+        int32_t x=cached?cached->x:pt_read(0x8+i*3+addr);
+        int32_t y=cached?cached->y:pt_read(0x9+i*3+addr);
+        int32_t z=cached?cached->z:pt_read(0xa+i*3+addr);
+#else
         int32_t x = pt_read(0x8 + i * 3 + addr);
         int32_t y = pt_read(0x9 + i * 3 + addr);
         int32_t z = pt_read(0xa + i * 3 + addr);
+#endif
         vx[i] = (int32_t)(((int64_t)x * m[0][0] + (int64_t)y * m[1][0] +
                            (int64_t)z * m[2][0]) >> 15) + t[0];
         vy[i] = (int32_t)(((int64_t)x * m[0][1] + (int64_t)y * m[1][1] +
                            (int64_t)z * m[2][1]) >> 15) + t[1];
         vz[i] = (int32_t)(((int64_t)x * m[0][2] + (int64_t)y * m[1][2] +
                            (int64_t)z * m[2][2]) >> 15) + t[2];
+#ifdef GEO_HAVE_MESH
+        if(cached){cached->vx=vx[i];cached->vy=vy[i];cached->vz=vz[i];
+            cached->stamp=mesh_active->generation;cached->projected=0;}
+#endif
     }
 
     int32_t zmax = vz[0], zmin = vz[0];
@@ -431,7 +451,12 @@ static void quad_fixed(int32_t color, uint32_t addr, int32_t polyshift,
     q.behind = 0;
 
     uint32_t uv_raw[8];
-    for (int k = 0; k < 8; k++) uv_raw[k] = (uint32_t)pt_read(k + addr) & 0xffffff;
+    for (int k = 0; k < 8; k++) {
+#ifdef GEO_HAVE_MESH
+        if(mesh_current){uv_raw[k]=mesh_current->uv[k];continue;}
+#endif
+        uv_raw[k] = (uint32_t)pt_read(k + addr) & 0xffffff;
+    }
 
     /* Per-vertex brightness, resolved ONCE per quad: the lit path advances
      * a shared index, so evaluating it twice (raw pass + clip pass) would
@@ -473,8 +498,17 @@ static void quad_fixed(int32_t color, uint32_t addr, int32_t polyshift,
     /* raw per-vertex projection -- parity with the oracle's scr16 */
     for (int i = 0; i < 4; i++) {
         if (vz[i] <= 0) { q.v[i].valid = 0; q.behind = 1; continue; }
+#ifdef GEO_HAVE_MESH
+        mesh_vertex *cached=mesh_current?&mesh_active->vertices[mesh_current->indices[i]]:NULL;
+        if(cached&&cached->projected){q.v[i].sx16=cached->sx;q.v[i].sy16=cached->sy;}
+        else {
+#endif
         q.v[i].sx16 = proj_sat((int64_t)cx * 16, vx[i], mant, shift, vz[i], 0);
         q.v[i].sy16 = proj_sat((int64_t)cy * 16, vy[i], mant, shift, vz[i], 1);
+#ifdef GEO_HAVE_MESH
+            if(cached){cached->sx=q.v[i].sx16;cached->sy=q.v[i].sy16;cached->projected=1;}
+        }
+#endif
         q.v[i].z    = vz[i];
         q.v[i].u    = uv_raw[2 * i]     & 0xfff;
         q.v[i].v    = uv_raw[2 * i + 1] & 0xfff;
@@ -697,6 +731,9 @@ void geo_hw_object(int32_t code, geo_quad_cb cb, void *user)
     const int pointram = (code == 0x5);
     if (pointram && !g_eng_pointram) return;
     g_lit_n = 0; g_lit_idx = 0;               /* lit_fx is per object */
+#ifdef GEO_HAVE_MESH
+    if(mesh_run(code,cb,user))return;
+#endif
     uint32_t list_addr = pointram ? 0xf00000u : (uint32_t)pt_read(code);
     for (int guard = 0; guard < 4096; guard++) {
         int32_t object_addr = pt_read(list_addr); list_addr += 1;
