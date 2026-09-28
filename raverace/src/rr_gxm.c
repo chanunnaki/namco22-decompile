@@ -348,9 +348,9 @@ static void upload_text(uint8_t *dst, size_t stride) {
     txt_uploaded_valid = true;
 }
 
-/* Palette/HUD work only reads the board snapshot at the frame boundary.
- * The CPU/DSP remain paused until drawing completes; scene preparation writes
- * neither text RAM nor palette RAM. Completion precedes all palette consumers. */
+/* The legacy palette/HUD worker reads the immutable render snapshot while the
+ * CPU/DSP can emulate the next frame. Join before palette consumers; the main
+ * thread cannot overwrite the snapshot until the render job completes. */
 static int frame_mixer_flags, frame_bg_palbase, frame_text_palbase;
 static uint8_t s_gamma_pal[0x18000];
 static SceUID s_build_thread = -1, s_build_start = -1, s_build_done = -1;
@@ -366,7 +366,7 @@ static void build_frame_layers(void) {
         s_gamma_pal[i + 0x10000] = gamma_prom[2][frame_mem.pal[i + 0x10000]];
     }
     eng_palette_from_planar(s_gamma_pal, 0x8000);
-    s_text_any = build_text(frame_text_palbase);
+    if (!quad_gxm_native_hud()) s_text_any = build_text(frame_text_palbase);
     s_build_us = sceKernelGetProcessTimeWide() - begin;
 }
 
@@ -517,7 +517,10 @@ static void prepare_snapshot(void) {
     frame_text_palbase = mixer_b(0x07) << 8 & 0x7f00;
 
     uint64_t prep_start = sceKernelGetProcessTimeWide();
-    if (gxm_ready) start_frame_build();
+    if (gxm_ready) {
+        if (quad_gxm_native_hud()) build_frame_layers();
+        else start_frame_build();
+    }
     int direct_count = frame_mem.direct_count;
     const bool walk = frame_mem.walk;
     qn = 0; qorder = 0;
@@ -548,20 +551,71 @@ static void prepare_snapshot(void) {
 
 int rr_gxm_quads(void) { return atomic_load_explicit(&presented_quads, memory_order_relaxed); }
 
+/* Mutable GPU resources are owned by a slot until its fragment notification.
+ * Wrap vita2d's EndScene to retain its own drawing/display bookkeeping. */
+static SceGxmNotification frame_fence[3];
+static bool frame_fence_pending[3], frame_fence_ready;
+static unsigned frame_slot, frame_sequence;
+static int buffered_mode=-1;
+int __real_sceGxmEndScene(SceGxmContext *,const SceGxmNotification *,const SceGxmNotification *);
+int __wrap_sceGxmEndScene(SceGxmContext *context,const SceGxmNotification *vertex,
+                        const SceGxmNotification *fragment) {
+    if(context!=gxm_context || !frame_fence_ready || fragment)
+        return __real_sceGxmEndScene(context,vertex,fragment);
+    frame_fence[frame_slot].value=++frame_sequence;
+    int r=__real_sceGxmEndScene(context,vertex,&frame_fence[frame_slot]);
+    if(r<0){VLOG("[GPU_FENCE] EndScene failed %08X\n",r);abort();}
+    frame_fence_pending[frame_slot]=true;
+    return r;
+}
+static void acquire_frame_resources(void) {
+    if(buffered_mode<0){
+        FILE *f=fopen("ux0:/data/raverace_gpu_serial.enable","rb");
+        buffered_mode=!f;if(f)fclose(f);
+        volatile unsigned int *region=sceGxmGetNotificationRegion();
+        if(region){
+            for(unsigned i=0;i<3;i++){frame_fence[i].address=region+i;region[i]=0;}
+            frame_fence_ready=true;
+        }
+        VLOG("[GPU_FENCE] buffered=%d notifications=%d\n",buffered_mode,frame_fence_ready);
+    }
+    if(buffered_mode && frame_fence_ready && quad_gxm_buffered()) {
+        frame_slot=(frame_slot+1)%3;
+        if(frame_fence_pending[frame_slot]){
+            int r=sceGxmNotificationWait(&frame_fence[frame_slot]);
+            if(r<0){VLOG("[GPU_FENCE] wait failed %08X\n",r);abort();}
+            frame_fence_pending[frame_slot]=false;
+        }
+    } else {
+        vita2d_wait_rendering_done();
+        memset(frame_fence_pending,0,sizeof frame_fence_pending);
+        frame_slot=0;
+    }
+    quad_gxm_select_frame(frame_slot);
+}
+
 static void draw_snapshot(int vw, int vh) {
     (void)vw; (void)vh;
     if (!assets_ok || !gxm_ready) return;
 
     uint64_t start_us = sceKernelGetProcessTimeWide();
-    /* Complete prior reads before reusing text, vertex or retired texture memory. */
-    vita2d_wait_rendering_done();
+    /* Acquire the selected resource slot; fallback rendering drains all reads. */
+    acquire_frame_resources();
+    uint64_t waited_us = sceKernelGetProcessTimeWide();
     gxm_tex_begin_frame();
     /* Hor+ widescreen aspect on 960x544 Vita screen */
     const double aspect = 960.0 / 544.0;
     const float E = (float)((NH * aspect - NW) / 2.0);
     quad_gxm_set_scene_extents(-E, NW + E);
 
-    finish_frame_build();
+    if (!quad_gxm_native_hud()) finish_frame_build();
+    if (quad_gxm_native_hud()) {
+        uint8_t colors[1024];
+        for(int i=0;i<256;i++){pen_rgb(frame_text_palbase+i,colors+i*4);colors[i*4+3]=255;}
+        unsigned sx=((frame_mem.tilemapattr[0]<<8 | frame_mem.tilemapattr[1])-0x35c)&1023;
+        unsigned sy=(frame_mem.tilemapattr[2]<<8 | frame_mem.tilemapattr[3])&1023;
+        quad_gxm_upload_hud(frame_mem.cgram,frame_mem.text,colors,sx,sy);
+    }
 
     uint64_t palette_us = sceKernelGetProcessTimeWide();
     /* Begin GXM scene via vita2d */
@@ -594,7 +648,8 @@ static void draw_snapshot(int vw, int vh) {
 
     uint64_t quads_us = sceKernelGetProcessTimeWide();
     /* Draw text layer */
-    if (s_text_any && s_txt_tex) {
+    if (quad_gxm_native_hud()) quad_gxm_draw_native_hud();
+    else if (s_text_any && s_txt_tex) {
         void *dst = vita2d_texture_get_datap(s_txt_tex);
         if (dst) {
             uint32_t stride = vita2d_texture_get_stride(s_txt_tex);
@@ -603,11 +658,14 @@ static void draw_snapshot(int vw, int vh) {
         }
     }
 
+    uint64_t hud_us = sceKernelGetProcessTimeWide();
     /* End GXM scene via vita2d */
     vita2d_end_drawing();
     uint64_t end_us = sceKernelGetProcessTimeWide();
-    static uint64_t palette_total, quads_total, text_total;
+    static uint64_t palette_total, quads_total, text_total, gpu_total, layer_total, hud_total, end_total;
     static unsigned samples;
+    gpu_total += waited_us-start_us; layer_total += palette_us-waited_us;
+    hud_total += hud_us-quads_us; end_total += end_us-hud_us;
     palette_total += palette_us - start_us;
     quads_total += quads_us - palette_us;
     text_total += end_us - quads_us;
@@ -615,6 +673,9 @@ static void draw_snapshot(int vw, int vh) {
         VLOG("[RENDER] ms/frame palette=%.2f quads=%.2f text=%.2f cache_hits=%d misses=%d\n",
              palette_total / 60000.0, quads_total / 60000.0, text_total / 60000.0,
              tex_frame_hits, tex_frame_misses);
+        VLOG("[SYNC] ms/frame gpu_wait=%.2f layers_upload=%.2f hud_draw=%.2f scene_end=%.2f\n",
+             gpu_total/60000.0,layer_total/60000.0,hud_total/60000.0,end_total/60000.0);
+        gpu_total=layer_total=hud_total=end_total=0;
         samples = 0;
         palette_total = quads_total = text_total = 0;
         tex_frame_hits = tex_frame_misses = 0;

@@ -47,6 +47,12 @@ void eng_draw_begin(void);
 void eng_draw_quad(const geo_quad *q, const eng_draw_cfg *cfg);
 void eng_draw_end(void);
 void quad_gxm_draw_text(const SceGxmTexture *tex);
+bool quad_gxm_native_hud(void);
+bool quad_gxm_buffered(void);
+void quad_gxm_select_frame(unsigned slot);
+void quad_gxm_upload_hud(const uint8_t *chars, const uint8_t *map,
+                         const uint8_t *rgba, unsigned sx, unsigned sy);
+void quad_gxm_draw_native_hud(void);
 
 extern double g_perf_bake, g_perf_gl, g_perf_clip;
 extern int    g_bri_min, g_bri_max, g_fogged_quads, g_fogA_min, g_fogA_max;

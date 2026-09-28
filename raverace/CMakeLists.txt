@@ -123,6 +123,9 @@ if(VITA OR CMAKE_SYSTEM_NAME STREQUAL "PSVita")
   add_executable(rr ${RR_VITA_SRC})
   target_compile_options(rr PRIVATE -Wall)
   target_include_directories(rr PRIVATE include gen src/snd "$ENV{VITASDK}/arm-vita-eabi/include/SDL2")
+  target_link_options(rr PRIVATE "-Wl,--wrap=sceGxmEndScene"
+      "-Wl,-T,${CMAKE_CURRENT_SOURCE_DIR}/vita/module_gap.ld")
+  set_property(TARGET rr APPEND PROPERTY LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/vita/module_gap.ld)
   target_link_libraries(rr PRIVATE
       -lSDL2
       -lvitashark

@@ -20,14 +20,15 @@ static bool batch_mapped, batch_released_cache;
 static uint64_t batch_started;
 static BatchVertex *batch_cpu, *batch_gpu;
 static uint16_t *batch_indices;
-static uint8_t *batch_palette;
+static uint8_t *batch_palette, *batch_frames;
+static size_t batch_frame_stride;
 static SceGxmTexture batch_rom_tex, batch_map_tex, batch_pal_tex;
 static SceGxmVertexProgram *batch_vp;
 static SceGxmFragmentProgram *batch_fp;
 static const SceGxmProgramParameter *batch_screen;
 static unsigned batch_count;
-static uint16_t batch_palette_gen[128];
-static bool batch_palette_valid;
+static uint16_t batch_palette_gen[3][128];
+static bool batch_palette_valid[3];
 static unsigned batch_sampler[3];
 
 static const char batch_v_src[] =
@@ -113,7 +114,8 @@ static bool batch_init(void) {
     if (!batch_screen) return false;
     size_t vertices_size = (BATCH_VERTICES * sizeof(BatchVertex) + 4095) & ~(size_t)4095;
     size_t index_size = (BATCH_VERTICES * sizeof(uint16_t) + 4095) & ~(size_t)4095;
-    size_t size = (BATCH_ROM_BYTES + BATCH_MAP_BYTES + BATCH_PAL_BYTES + vertices_size + index_size + 0x3ffff) & ~(size_t)0x3ffff;
+    batch_frame_stride=BATCH_PAL_BYTES+vertices_size;
+    size_t size = (BATCH_ROM_BYTES + BATCH_MAP_BYTES + 3*batch_frame_stride + index_size + 0x3ffff) & ~(size_t)0x3ffff;
     /* No baked texture has been used yet. Release its reserved pool so the
      * ROM sampler does not spill into uncached system RAM beside a idle cache. */
     gxm_tex_shutdown(); batch_released_cache = true;
@@ -130,9 +132,10 @@ static bool batch_init(void) {
     uint8_t *map = malloc(BATCH_MAP_BYTES);
     if (!batch_cpu || !map) { free(map); return false; }
     uint8_t *rom = batch_memory, *gpu_map = rom + BATCH_ROM_BYTES;
-    batch_palette = gpu_map + BATCH_MAP_BYTES;
+    batch_frames = gpu_map + BATCH_MAP_BYTES;
+    batch_palette = batch_frames;
     batch_gpu = (BatchVertex *)(batch_palette + BATCH_PAL_BYTES);
-    batch_indices = (uint16_t *)((uint8_t *)batch_gpu + vertices_size);
+    batch_indices = (uint16_t *)(batch_frames + 3*batch_frame_stride);
     batch_pack_rom(rom, map, g_texture_data);
     vita_log("[BATCH] pen ROM packed as spatial 16x16 tiles\n");
     for (unsigned i = 0; i < BATCH_MAP_BYTES / 4; i++) {
@@ -173,16 +176,19 @@ static bool batch_begin(void) {
     }
     if (!batch_active) return false;
     batch_count = 0;
+    batch_palette=batch_frames+s_frame_slot*batch_frame_stride;
+    batch_gpu=(BatchVertex *)(batch_palette+BATCH_PAL_BYTES);
+    sceGxmTextureSetData(&batch_pal_tex,batch_palette);
     uint8_t rgba[256 * 4];
     for (int group = 0; group < 128; group++) {
-        if (batch_palette_valid && batch_palette_gen[group] == g_eng_pal_gen[group]) continue;
+        if (batch_palette_valid[s_frame_slot] && batch_palette_gen[s_frame_slot][group] == g_eng_pal_gen[group]) continue;
         for (int i = 0; i < 256; i++) {
             memcpy(rgba + i*4, direct_palette[group][i], 3); rgba[i*4+3] = 255;
         }
         memcpy(batch_palette + group * sizeof rgba, rgba, sizeof rgba);
-        batch_palette_gen[group] = g_eng_pal_gen[group];
+        batch_palette_gen[s_frame_slot][group] = g_eng_pal_gen[group];
     }
-    batch_palette_valid = true;
+    batch_palette_valid[s_frame_slot] = true;
     batch_started = sceKernelGetProcessTimeWide();
     return true;
 }

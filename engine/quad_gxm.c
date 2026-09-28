@@ -245,6 +245,10 @@ static SceGxmProgram *compile_one(const char *src, shark_type type, const char *
     return copy;
 }
 
+static unsigned s_frame_slot;
+static void draw_fan(int n);
+#include "quad_gxm_hud.inc"
+
 bool quad_gxm_init(SceGxmContext *ctx, SceGxmShaderPatcher *patcher) {
     s_ctx = ctx;
     s_patcher = patcher;
@@ -359,11 +363,13 @@ bool quad_gxm_init(SceGxmContext *ctx, SceGxmShaderPatcher *patcher) {
 
     if (!s_fprog_opaque || !s_fprog_blend || !s_fprog_text || !s_u_screen_params || !s_u_params || !s_fan_indices)
         return false;
+    hud_init(vp_header);
     quad_gxm_set_scene_extents(0.0f, (float)ENG_SCREEN_W);
     return true;
 }
 
 void quad_gxm_shutdown(void) {
+    hud_shutdown();
     if (s_fprog_text) { sceGxmShaderPatcherReleaseFragmentProgram(s_patcher, s_fprog_text); s_fprog_text = NULL; }
     if (s_vprog) { sceGxmShaderPatcherReleaseVertexProgram(s_patcher, s_vprog); s_vprog = NULL; }
     if (s_fprog_opaque) { sceGxmShaderPatcherReleaseFragmentProgram(s_patcher, s_fprog_opaque); s_fprog_opaque = NULL; }
@@ -388,10 +394,13 @@ void quad_gxm_shutdown(void) {
 
 #include "quad_gxm_batch.inc"
 
+bool quad_gxm_buffered(void) { return batch_active && hud_active; }
+void quad_gxm_select_frame(unsigned slot) { s_frame_slot=slot%3; }
+
 void eng_draw_begin(void) {
     batch_begin();
     /* rr_gxm_draw has waited for the preceding scene. */
-    s_vtx_ring_offset = 0;
+    s_vtx_ring_offset = s_frame_slot*(VTX_RING_SIZE/4);
     if (s_ctx && s_vprog) {
         sceGxmSetCullMode(s_ctx, SCE_GXM_CULL_NONE);
         sceGxmSetFrontDepthFunc(s_ctx, SCE_GXM_DEPTH_FUNC_ALWAYS);
