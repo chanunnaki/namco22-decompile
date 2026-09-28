@@ -28,6 +28,8 @@
 #include <psp2/kernel/processmgr.h>
 #include <psp2/kernel/cpu.h>
 #include "rr_vita_worker.h"
+#include <zlib.h>
+static int cpu_bench;
 #define glFinish() rr_gxm_finish()
 #else
 #include <GL/gl.h>
@@ -378,8 +380,21 @@ void rr_tick(void)
         VLOG("[TIMING] ms/frame cpu=%.2f dsp=%.2f sound=%.2f mix=%.2f prepare=%.2f draw=%.2f\n",
             cpu_us / 60000.0, dsp_us / 60000.0, sound_us / 60000.0,
             audio_us / 60000.0, video_us / 60000.0, host_us / 60000.0);
+        { extern uint64_t rr_cpu_wait_instructions;
+          VLOG("[CPU_EVENTS] accounted wait instructions/frame=%llu\n",
+               (unsigned long long)(rr_cpu_wait_instructions / 60));
+          rr_cpu_wait_instructions = 0; }
         cpu_us = dsp_us = sound_us = audio_us = video_us = host_us = 0;
         previous_end = sceKernelGetProcessTimeWide();
+    }
+#endif
+#ifdef __vita__
+    if (cpu_bench) {
+        /* Reproducible A/B workload, opt-in only; replaces physical controls. */
+        g_hw.inputs = 0xFEFF;
+        if (frame >= 180 && frame < 186) g_hw.inputs &= (uint16_t)~0x1000;
+        g_hw.gas = frame >= 240 ? 0x610 : 0;
+        g_hw.brake = 0; g_hw.steer = 0x800;
     }
 #endif
     rr_input_frame(frame);                         /* replay overrides, recorder logs */
@@ -395,6 +410,14 @@ void rr_tick(void)
     rr_dsp_vblank();
     rr_hw_vblank();
     deliver_irqs();
+#ifdef __vita__
+    if (cpu_bench && frame % 60 == 0) {
+        VLOG("[CPU_CHECK] frame=%u regs=%08lx wram=%08lx poly=%08lx shared=%08lx budget=%d\n",
+             frame, crc32(0, R, sizeof R), crc32(0, g_rr.wram, sizeof g_rr.wram),
+             crc32(0, (const Bytef *)g_rr.poly, sizeof g_rr.poly),
+             crc32(0, g_rr.shared, sizeof g_rr.shared), rr_budget);
+    }
+#endif
     if (dump_dir) {             /* RR_DUMP_EVERY=n (default 60), RR_DUMP_FROM=f: dump cadence */
         static unsigned every, from; static int init;
         if (!init) { const char *e = getenv("RR_DUMP_EVERY"), *f = getenv("RR_DUMP_FROM");
@@ -583,6 +606,14 @@ int main(int argc, char **argv)
     fprintf(stderr, "[RR] reset: SP=%08X PC=%08X\n", (uint32_t)RG4(REG_SP), rr_read(4, 4));
     rr_call_push(0xFFFFFFFEu);                  /* bottom of the shadow stack */
     { extern void rd_init(void); rd_init(); }   /* readable-C replacements (src/rd) */
+#ifdef __vita__
+    { extern void rr_cpu_init(void); extern int rr_cpu_native;
+      rr_cpu_init(); VLOG("[CPU] event-driven controller=%d\n", rr_cpu_native);
+      FILE *f = fopen("ux0:/data/raverace_cpu_bench.enable", "rb");
+      if (f) { fclose(f); cpu_bench = 1; max_frames = 1200;
+          VLOG("[CPU_BENCH] scripted coin=180 gas=240 stop=1200\n"); }
+    }
+#endif
     VLOG("[MAIN] Starting lifted program entry_reset (L_4000)...\n");
     L_4000();                                   /* entry_reset: never returns */
     VLOG("[MAIN] entry_reset returned?!\n");

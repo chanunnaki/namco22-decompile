@@ -1,3 +1,12 @@
+## Native CPU controller — 2026-09-29
+
+- Fork: `chanunnaki/namco22-decompile`, branch `codex/vita-native`; origin is the fork, upstream push disabled. Fork baseline commit `d12fe1d`.
+- User requests architectural CPU replacement targeting at least 50% CPU-time reduction. Implemented native event-driven frame controller (`rr_cpu.c`), replacing the running frame loop and service wait. Original CPU translation remains unchanged, attached by a guarded build adapter. Guest instruction budgets, idle counter, flags, scheduler events and game calls are preserved.
+- `native-cpu-events-1` installed and verified on Vita TV .158 via Companion. SHA256 `78763020e3276d379395966c114b206c6cc64f50575bac3cd4ff21a350ce2e79`. Original-controller and native-controller A/B runs: 1200 identical scripted frames each, all 20 state CRC/budget/geometry checkpoints match. No runtime faults. Race grid/countdown CPU median 13.920 -> 3.695 ms (73.5% reduction); post-boot sequence median 13.190 -> 1.430 ms (89.2%). Full-lap timing not yet measured. Total FPS is still constrained by DSP/rendering.
+- 360 host comparisons against extracted original instructions pass ASan/UBSan, checking all registers, WRAM, stack effects, budgets and every scheduler/call boundary. Details and per-window evidence: `docs/RAVERACER_CPU_ARCHITECTURE.md`, `docs/RAVERACER_CPU_BENCHMARK.csv`.
+- Benchmark and legacy markers removed for normal play; native enabled by default. Fallback marker `ux0:/data/raverace_cpu_legacy.enable`. Opt-in scripted benchmark marker `ux0:/data/raverace_cpu_bench.enable` overrides controls and stops at frame1200; do not leave it enabled for the user.
+- Local rollback `/tmp/raverace-before-native-cpu.eboot.bin` (atlas-3). Logs `/tmp/raverace-cpu-baseline.log`, `/tmp/raverace-cpu-native-result.log`. No need for manual VPK installation.
+
 ## Atlas build and current results
 
 - User confirms pipeline2 peaks23FPS (pipeline1 mostly18–20/peak22). Screenshot `/tmp/raverace-pipeline-2.png` inspected: road/buildings/mirror/HUD intact, overlay19FPS. User confirms countdown road jerk is also present on old Blue Vita2000 build, so it predates this work.

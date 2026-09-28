@@ -1,0 +1,21 @@
+frame,legacy_cpu_ms,native_cpu_ms,quads,matching_state
+60,15.75,15.68,0,regs=70b198fd wram=4e25f544 poly=7ee8cdcd shared=011ffca6 budget=5187
+120,17.21,11.34,2,regs=ae40b1a6 wram=5a8e3813 poly=dee2b5fd shared=fe2fca33 budget=3215
+180,13.27,2.35,666,regs=79d0b508 wram=01865a9e poly=139af85c shared=0913bf88 budget=3623
+240,12.71,2.09,36,regs=8099ca4b wram=60479345 poly=269293eb shared=7423e398 budget=3629
+300,12.95,1.43,93,regs=7f3681f2 wram=2a17eab3 poly=ac44aad7 shared=11aae19a budget=3629
+360,13.1,1.43,93,regs=e4c8cc37 wram=ce54c5b9 poly=794725c9 shared=1c515a3d budget=3629
+420,13.4,1.43,93,regs=e4c8cc37 wram=a0471acd poly=c25f4e6c shared=10af6010 budget=3629
+480,13.18,1.56,93,regs=e4c8cc37 wram=a2fc8173 poly=794725c9 shared=ef192f04 budget=3629
+540,13.2,1.45,93,regs=7f3681f2 wram=9311682b poly=c25f4e6c shared=ba5cc1ba budget=3629
+600,13.09,1.22,93,regs=7f3681f2 wram=a3e37247 poly=794725c9 shared=cf860909 budget=3629
+660,13.1,1.42,93,regs=e2c894c9 wram=ee7b368a poly=c25f4e6c shared=629282a1 budget=3629
+720,13.15,1.28,93,regs=e2c894c9 wram=53e5ead3 poly=794725c9 shared=ba3676f5 budget=3629
+780,13.21,1.28,93,regs=e2c894c9 wram=be25a6e8 poly=c25f4e6c shared=6ecda4e9 budget=3629
+840,13.3,1.29,93,regs=e2c894c9 wram=37b9c2e0 poly=794725c9 shared=6643fb7b budget=3629
+900,13.03,1.05,65,regs=01b6fecf wram=50a9ccfa poly=dca91881 shared=2f7b764d budget=3629
+960,13.13,1.05,64,regs=02a0de2f wram=aa167d20 poly=cba8046a shared=bd98a191 budget=3629
+1020,13.64,3.71,2057,regs=9ef84fb8 wram=e22d4f6d poly=b36d2bc8 shared=d5244275 budget=3629
+1080,14.08,3.75,2056,regs=3208c946 wram=8b156fe3 poly=d6af4d2c shared=0cc4db2d budget=3629
+1140,13.88,3.65,2057,regs=634252c5 wram=456a0f59 poly=cc9376a2 shared=22ed901b budget=3629
+1200,13.96,3.68,2057,regs=53842444 wram=b45c50e8 poly=85c2e96e shared=234e79aa budget=3628

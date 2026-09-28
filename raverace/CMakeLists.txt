@@ -78,6 +78,15 @@ if(VITA OR CMAKE_SYSTEM_NAME STREQUAL "PSVita")
       ${NAMCO22_ENGINE_DIR}/quad_gxm.c
   )
 
+  # Keep the upstream instruction runner intact as the CPU oracle/fallback.
+  set(RR_NATIVE_LIFT ${CMAKE_CURRENT_BINARY_DIR}/rr_cpu_lifted.c)
+  add_custom_command(OUTPUT ${RR_NATIVE_LIFT}
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/gen/cpu_native.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/gen/rr_lifted.c ${RR_NATIVE_LIFT}
+    DEPENDS gen/rr_lifted.c tools/gen/cpu_native.py
+    COMMENT "Connecting the event-driven CPU controller")
+  set_source_files_properties(${RR_NATIVE_LIFT} PROPERTIES COMPILE_OPTIONS "-O1;-w")
+
   set(RR_VITA_SRC
       src/rr_romzip.c
       src/rr_main.c
@@ -96,7 +105,8 @@ if(VITA OR CMAKE_SYSTEM_NAME STREQUAL "PSVita")
       ${NAMCO22_ENGINE_SND_SRC}
       src/snd/snd_board.c
       gen/snd_driver.c
-      gen/rr_lifted.c
+      ${RR_NATIVE_LIFT}
+      src/rr_cpu.c
       ${RD_SRC}
   )
 
