@@ -44,6 +44,8 @@ void vita_log(const char *fmt, ...) {
 
 static bool running = true;
 static bool audio_ok = false;
+/* Diagnostic: omit the sound CPU, mixer, output and worker dependency. */
+bool rr_vita_sound_disabled;
 
 /* Settings stubs */
 void rr_host_set_winmode(int m) { (void)m; }
@@ -69,7 +71,7 @@ int  rr_host_joytest(void) { return 0; }
 bool rr_host_open(int scale) {
     (void)scale;
 
-    vita_log("[BUILD] gpu-native-textures-3\n");
+    vita_log("[BUILD] sound-bypass-1\n");
 
     // Maximize Vita performance profile (444 MHz CPU, 222 MHz GPU)
     scePowerSetArmClockFrequency(444);
@@ -82,12 +84,17 @@ bool rr_host_open(int scale) {
     // Enable analog sticks on Vita
     sceCtrlSetSamplingMode(SCE_CTRL_MODE_ANALOG);
 
+    FILE *sound_marker = fopen("ux0:/data/raverace_sound_disable.enable", "rb");
+    rr_vita_sound_disabled = sound_marker != NULL;
+    if (sound_marker) fclose(sound_marker);
+    vita_log("[SOUND_BYPASS] enabled=%d (CPU/mixer/output/worker)\n", rr_vita_sound_disabled);
+
     // Initialize SDL2 for audio subsystem
-    if (SDL_Init(SDL_INIT_AUDIO | SDL_INIT_TIMER) != 0) {
+    if (SDL_Init(SDL_INIT_TIMER | (rr_vita_sound_disabled ? 0 : SDL_INIT_AUDIO)) != 0) {
         fprintf(stderr, "[VITA_HOST] SDL_Init audio warning: %s\n", SDL_GetError());
     }
 
-    if (rr_audio_output_open()) {
+    if (!rr_vita_sound_disabled && rr_audio_output_open()) {
         rr_audio_set_volume(100);
         audio_ok = true;
     }

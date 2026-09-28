@@ -267,6 +267,7 @@ bool g_rr_in_vblank;
 static int vblank_slices;
 
 #ifdef __vita__
+extern bool rr_vita_sound_disabled;
 static rr_vita_worker sound_worker;
 static uint64_t sound_work_us, mix_work_us;
 static void sound_job(void *arg) {
@@ -302,7 +303,7 @@ void rr_tick(void)
     if (previous_end) cpu_us += tick_start - previous_end;
     /* Sound uses shared RAM/C352; DSP uses polygon/point RAM. The 68K
      * remains paused here, and resumes only after both devices complete. */
-    start_sound_job();
+    if (!rr_vita_sound_disabled) start_sound_job();
 #endif
     g_rr_in_vblank = vblank_slices > 0;
     if (vblank_slices > 0) {                       /* split the vblank slice at VBEND */
@@ -321,12 +322,12 @@ void rr_tick(void)
     dsp_us += dsp_end - tick_start;
 #endif
 #ifdef __vita__
-    rr_worker_join(&sound_worker);
+    if (!rr_vita_sound_disabled) rr_worker_join(&sound_worker);
     uint64_t audio_end = sceKernelGetProcessTimeWide();
     sound_us += sound_work_us;
     audio_us += mix_work_us;
     static uint64_t device_us, join_us, wake_us;
-    if (sound_worker.thread >= 0) wake_us += sound_worker.started_us - sound_worker.dispatched_us;
+    if (!rr_vita_sound_disabled && sound_worker.thread >= 0) wake_us += sound_worker.started_us - sound_worker.dispatched_us;
     device_us += audio_end - tick_start;
     join_us += audio_end - dsp_end;
     previous_end = audio_end;
@@ -375,7 +376,7 @@ void rr_tick(void)
     host_us += previous_end - video_end;
     if (frame % 60 == 0) {
         VLOG("[DEVICES] ms/frame parallel=%.2f join=%.2f wake=%.2f core=%d (sound/mix overlap DSP)\n",
-             device_us / 60000.0, join_us / 60000.0, wake_us / 60000.0, sound_worker.cpu_id);
+             device_us / 60000.0, join_us / 60000.0, wake_us / 60000.0, rr_vita_sound_disabled ? -1 : sound_worker.cpu_id);
         device_us = join_us = wake_us = 0;
         VLOG("[TIMING] ms/frame cpu=%.2f dsp=%.2f sound=%.2f mix=%.2f prepare=%.2f draw=%.2f\n",
             cpu_us / 60000.0, dsp_us / 60000.0, sound_us / 60000.0,
@@ -584,10 +585,16 @@ int main(int argc, char **argv)
         VLOG("[MAIN] FATAL: rr_load_program failed!\n");
         return 2;
     }
+    #ifdef __vita__
+    if (!rr_vita_sound_disabled) {
+    #endif
     VLOG("[MAIN] Calling rr_audio_init('%s')...\n", rom_dir);
     rr_audio_init(rom_dir);
     VLOG("[MAIN] Calling rr_sound_init('%s')...\n", rom_dir);
     rr_sound_init(rom_dir);
+    #ifdef __vita__
+    }
+    #endif
     VLOG("[MAIN] Calling rr_hw_init('%s')...\n", rom_dir);
     rr_hw_init(rom_dir);
     if (freeplay >= 0) rr_hw_set_freeplay(freeplay);

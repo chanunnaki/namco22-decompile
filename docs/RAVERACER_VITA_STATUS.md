@@ -1,3 +1,10 @@
+## Full sound bypass diagnostic — 2026-09-29
+
+- User requested all sound processing removed from the loop. `sound-bypass-1` skips sound MCU and mixer initialization/execution, SDL audio output and all sound-worker creation/dispatch/join when `ux0:/data/raverace_sound_disable.enable` exists. Driving I/O remains active. Remove marker and relaunch to restore sound.
+- Same-binary 1800-frame comparison: frame **33.62 -> 26.88 ms**, about **29.7 -> 37.2 FPS**. Device phase 23.95 -> 4.30 ms; sound/mix/wake all zero. Renderer dependency becomes exposed: preparation/join/snapshot 4.61 -> 17.66 ms, renderer job 21.75 -> 22.89 ms. Sound removal alone does not reach 60 FPS.
+- Both runs exit cleanly; all 30 scene triangle and race mode/speed checkpoints match. Full CPU/shared/WRAM state and budget differ with sound MCU absent, so no full emulation-equivalence claim. Opening segment only. Build and diff checks pass. Baseline boot capture at frame 8 is outside measured frames 1200–1800.
+- Installed/readback SHA256 `63671041c83812b58afcafbc8ff7702fb82cd5cd0fa0d4037800dd020f1ce8c0` on Vita TV .158; silent mode left enabled with normal controls restored. User gameplay/FPS feedback pending. Details: `docs/RAVERACER_SOUND_BYPASS.md`; measurements: `docs/RAVERACER_SOUND_BYPASS_BENCHMARK.csv`.
+
 ## Native glyph HUD and scene texture bank — 2026-09-29
 
 - HUD now draws cached visible RGBA glyphs as one batch, replacing full-screen per-fragment tilemap decoding. Three independently versioned, fenced atlases preserve queued GPU ownership. Scene triangles use a predecoded 16 MiB pen bank selected by projected coverage, with a small native shader; uncached triangles retain the reference decoder in exact original order. Full resolution and palette/fog/priority semantics remain.
