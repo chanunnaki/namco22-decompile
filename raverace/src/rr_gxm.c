@@ -626,6 +626,7 @@ static SceGxmNotification frame_fence[3];
 static bool frame_fence_pending[3], frame_fence_ready;
 static unsigned frame_slot, frame_sequence;
 static int buffered_mode=-1;
+#include "rr_present_trace.inc"
 int __real_sceGxmEndScene(SceGxmContext *,const SceGxmNotification *,const SceGxmNotification *);
 int __wrap_sceGxmEndScene(SceGxmContext *context,const SceGxmNotification *vertex,
                         const SceGxmNotification *fragment) {
@@ -635,6 +636,7 @@ int __wrap_sceGxmEndScene(SceGxmContext *context,const SceGxmNotification *verte
     int r=__real_sceGxmEndScene(context,vertex,&frame_fence[frame_slot]);
     if(r<0){VLOG("[GPU_FENCE] EndScene failed %08X\n",r);abort();}
     frame_fence_pending[frame_slot]=true;
+    present_scene_end=sceKernelGetProcessTimeWide();
     return r;
 }
 static void acquire_frame_resources(void) {
@@ -864,4 +866,7 @@ void rr_gxm_finish(void) {
         s_build_thread = s_build_start = s_build_done = -1;
     }
     vita2d_wait_rendering_done();
+    /* Fragment completion does not guarantee the display callback returned. */
+    int result=sceGxmDisplayQueueFinish();
+    if(result<0)VLOG("[GPU_FENCE] display queue shutdown failed %08X\n",result);
 }

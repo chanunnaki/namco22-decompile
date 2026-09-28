@@ -446,6 +446,10 @@ void rr_tick(void)
         perf_report();
         rr_input_record_stop();
         rr_audio_close();
+        /* The final frame can still be rendering. Join workers and drain
+         * display callbacks before exit() tears down libc streams/heap. */
+        rr_host_close();
+        VLOG("[RUN_END] frame=%u traps=%u host_closed=1\n", frame, n_traps);
         fprintf(stderr, "[RR] stop at frame %u, %u traps\n", frame, n_traps);
         exit(n_traps ? 3 : 0);
     }
